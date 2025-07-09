@@ -323,6 +323,8 @@ class FSDPEngine(TrainEngine):
         self, input_: TensorDict, mb_spec: MicroBatchSpec
     ) -> MicroBatchList:
         assert "attention_mask" in input_ and "input_ids" in input_
+        if isinstance(input_, dict):
+            input_ = TensorDict(input_, batch_size=[input_["input_ids"].shape[0]])
         input_ = amend_position_ids(input_)
         packed_input = pack_tensor_dict(input_)
         mb_list = split_packed_tensor_dict_into_mb_list(
@@ -403,6 +405,7 @@ class FSDPEngine(TrainEngine):
         loss_weight_fn: Callable[[Dict], float],
     ) -> torch.Tensor | None:
         """Evaluate on a batch."""
+        input_ = input_.to(self.device)
         mb_list = self._prepare_mb_list(input_, mb_spec)
         total_loss_weight = torch.tensor(
             sum([loss_weight_fn(mb) for mb in mb_list.mbs]), dtype=torch.float32
@@ -437,6 +440,7 @@ class FSDPEngine(TrainEngine):
         aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
     ) -> Any | None:
         """Forward pass with optional post-processing."""
+        input_ = input_.to(self.device)
         cu_seqlens = pack_tensor_dict(input_)["cu_seqlens"]
         mb_list = self._prepare_mb_list(input_, mb_spec)
 
