@@ -75,7 +75,6 @@ def sglang_server():
     process.terminate()
 
 
-@pytest.mark.skip("")
 @pytest.mark.asyncio
 async def test_remote_sglang_generate(sglang_server):
     from arealite.engine.sglang_remote import RemoteSGLangEngine
@@ -99,7 +98,6 @@ async def test_remote_sglang_generate(sglang_server):
     assert isinstance(resp.completions, str)
 
 
-@pytest.mark.skip("")
 @pytest.mark.parametrize("n_samples", [1, 2, 4])
 def test_remote_sglang_rollout(sglang_server, n_samples):
     from arealite.engine.sglang_remote import RemoteSGLangEngine

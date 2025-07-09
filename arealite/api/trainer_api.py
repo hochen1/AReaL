@@ -4,7 +4,7 @@ from typing import Dict
 
 import torch.distributed as dist
 import wandb
-from tensorboardX import SummaryWrite
+from tensorboardX import SummaryWriter
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from arealite.api.cli_args import TrainerConfig

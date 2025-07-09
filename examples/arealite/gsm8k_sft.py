@@ -85,4 +85,6 @@ def main_sft():
 
 
 if __name__ == "__main__":
-    main_sft()
+    args = parse_args()
+    trainer = SFTTrainer(args)
+    trainer.train()

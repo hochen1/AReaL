@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from queue import Empty, Full, Queue
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
@@ -349,7 +350,7 @@ class RemoteSGLangEngine(InferenceEngine):
             finish_reason = meta_info["finish_reason"]
             stop_reason = finish_reason["type"]
 
-            payload["text"] += completions
+            payload["text"] += result["text"]
 
         latency = time.perf_counter() - start_time
 

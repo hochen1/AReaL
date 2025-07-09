@@ -60,6 +60,10 @@ class FinetuneSpec:
         # assuming drop_last
         return self.total_train_epochs * (self.dataset_size // self.train_batch_size)
 
+    @property
+    def steps_per_epoch(self):
+        return self.dataset_size // self.train_batch_size
+
 
 class AllocationType(enum.Enum):
     DECOUPLED_vLLM = 1
