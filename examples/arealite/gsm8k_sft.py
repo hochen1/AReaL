@@ -1,4 +1,3 @@
-import functools
 import os
 import sys
 
@@ -89,7 +88,7 @@ def main_sft():
                 stats_tracker.record_timing("train_step"),
                 stats_tracker.scope("sft"),
             ):
-                stats = engine.train_lm(data, config.mb_spec)
+                stats = engine.train_lm(data)
                 engine.step_lr_scheduler()
                 stats_tracker.scalar(**stats)
 
@@ -99,13 +98,9 @@ def main_sft():
             with stats_tracker.record_timing("eval"), stats_tracker.scope("sft-eval"):
                 # No need to log anything. Logging will be handled outside
                 # via stats_tracker.export().
-                evaluate_fn = functools.partial(
-                    engine.evaluate_lm,
-                    mb_spec=config.mb_spec,
-                )
                 evaluator.evaluate(
                     valid_dataloader,
-                    evaluate_fn,
+                    engine.evaluate_lm,
                     epoch,
                     step,
                     global_step,

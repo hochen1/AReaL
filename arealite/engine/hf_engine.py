@@ -9,12 +9,7 @@ import torch.distributed as dist
 import transformers
 from transformers import AutoConfig, AutoModelForCausalLM
 
-from arealite.api.cli_args import (
-    EngineConfig,
-    MicroBatchSpec,
-    ParallelismConfig,
-    TrainingArgs,
-)
+from arealite.api.cli_args import EngineConfig, ParallelismConfig, TrainingArgs
 from arealite.api.engine_api import TrainEngine
 from arealite.api.io_struct import FinetuneSpec
 from arealite.api.llm_client_api import LLMClient
@@ -150,7 +145,6 @@ class HFEngine(TrainEngine):
     def train_batch(
         self,
         input_: Dict,
-        mb_spec: MicroBatchSpec,
         loss_fn: Callable[[torch.Tensor, Dict], torch.Tensor],
         loss_weight_fn: Callable[[Dict], float],
     ) -> Dict:
@@ -192,7 +186,6 @@ class HFEngine(TrainEngine):
     def eval_batch(
         self,
         input_: Dict,
-        mb_spec: MicroBatchSpec,
         loss_fn: Callable[[torch.Tensor, Dict], torch.Tensor],
         loss_weight_fn: Callable[[Dict], float],
     ) -> torch.Tensor | None:
@@ -221,7 +214,6 @@ class HFEngine(TrainEngine):
     def forward(
         self,
         input_: Dict,
-        mb_spec: MicroBatchSpec,
         output_seqlens: List[int] | None = None,
         post_hook: Callable[[torch.Tensor, Dict], Any] | None = None,
         aggregate_fn: Callable[[List[Any]], Any] = functools.partial(torch.cat, dim=1),

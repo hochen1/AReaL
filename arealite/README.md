@@ -187,7 +187,6 @@ class TrainEngine(abc.ABC):
     def train_batch(
         self,
         input_: Dict,
-        mb_spec: MicroBatchSpec,
         loss_fn: Callable[[torch.Tensor, Dict], torch.Tensor],
         loss_weight_fn: Callable[[Dict], float],
     ) -> Dict[str, float]:
@@ -197,7 +196,6 @@ class TrainEngine(abc.ABC):
     def eval_batch(
         self,
         input_: Dict,
-        mb_spec: MicroBatchSpec,
         loss_fn: Callable[[torch.Tensor, Dict], torch.Tensor],
         loss_weight_fn: Callable[[Dict], float],
     ) -> torch.Tensor | None:
@@ -207,7 +205,6 @@ class TrainEngine(abc.ABC):
     def forward(
         self,
         input_: Dict,
-        mb_spec: MicroBatchSpec,
         output_seqlens: List[List[int]] | None = None,
         post_hook: Callable[[torch.Tensor, Dict], Any] | None = None,
         aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
@@ -323,7 +320,7 @@ Extended engines (such as Actor in PPO) provide convenient organization and call
 class Actor(Engine):
     
     @torch.no_grad()
-    def compute_logps(self, input_: Dict[str, Tensor], mb_spec: MicroBatchSpec) -> torch.Tensor:
+    def compute_logps(self, input_: Dict[str, Tensor]) -> torch.Tensor:
         ... # unpad
         logps = self.forward(xxx)
         ... # pad back
@@ -332,8 +329,7 @@ class Actor(Engine):
     def compute_advantages_and_returns(self, input_: Dict) -> Dict:
         pass
 
-    def ppo_update(self, input_: Dict, 
-                   mb_spec: MicroBatchSpec) -> List[Dict[str, float]]:
+    def ppo_update(self, input_: Dict) -> List[Dict[str, float]]:
         ...
         all_stats = []
         for _ in range(self.ppo_n_minibatches):
@@ -344,11 +340,10 @@ class Actor(Engine):
 class Critic(Engine):
     
     @torch.no_grad()
-    def compute_values(self, input_: Dict, mb_spec: MicroBatchSpec) -> torch.Tensor:
+    def compute_values(self, input_: Dict) -> torch.Tensor:
         pass
 
-    def ppo_update(self, input_: Dict, 
-                   mb_spec: MicroBatchSpec) -> List[Dict[str, float]]:
+    def ppo_update(self, input_: Dict) -> List[Dict[str, float]]:
         ...
         all_stats = []
         for _ in range(self.ppo_n_minibatches):

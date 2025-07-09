@@ -4,7 +4,7 @@ import torch
 import torch.utils.data
 from tensordict import TensorDict
 
-from arealite.api.cli_args import MicroBatchSpec, TrainEngineConfig
+from arealite.api.cli_args import TrainEngineConfig
 from arealite.api.engine_api import TrainEngine
 from arealite.engine.fsdp_engine import FSDPEngine
 from arealite.utils.functional import gather_logprobs
@@ -15,22 +15,20 @@ class LMEngine:
     def __init__(self, engine: TrainEngine):
         self.engine = engine
 
-    def train_lm(self, data: TensorDict, mb_spec: MicroBatchSpec):
+    def train_lm(self, data: TensorDict):
         self.engine.train()
         return self.engine.train_batch(
             input_=data,
             loss_fn=compute_packed_sft_loss,
             loss_weight_fn=lambda x: x["prompt_mask"].logical_not().count_nonzero(),
-            mb_spec=mb_spec,
         )
 
-    def evaluate_lm(self, data, mb_spec: MicroBatchSpec):
+    def evaluate_lm(self, data):
         self.engine.eval()
         self.engine.eval_batch(
             input_=data,
             loss_fn=compute_packed_sft_loss,
             loss_weight_fn=lambda x: x["prompt_mask"].logical_not().count_nonzero(),
-            mb_spec=mb_spec,
         )
 
 
@@ -39,11 +37,11 @@ class FSDPLMEngine(FSDPEngine):
         super().__init__(config)
         self.lm_engine = LMEngine(self)
 
-    def train_lm(self, data, mb_spec):
-        return self.lm_engine.train_lm(data, mb_spec)
+    def train_lm(self, data):
+        return self.lm_engine.train_lm(data)
 
-    def evaluate_lm(self, data, mb_spec):
-        return self.lm_engine.evaluate_lm(data, mb_spec)
+    def evaluate_lm(self, data):
+        return self.lm_engine.evaluate_lm(data)
 
 
 def compute_packed_sft_loss(

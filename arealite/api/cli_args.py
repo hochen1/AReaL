@@ -120,6 +120,8 @@ class TrainEngineConfig:
         default=False,
         metadata={"help": "Initialize critic/reward model from LM checkpoint"},
     )
+    # Runtime microbatch limit
+    mb_spec: MicroBatchSpec = field(default_factory=MicroBatchSpec)
 
     # Training Backend Configuration
     gradient_checkpointing: bool = field(
@@ -533,7 +535,6 @@ class BaseExperimentConfig:
         },
     )
     tokenizer_path: str = field(default="")
-    mb_spec: MicroBatchSpec = field(default_factory=MicroBatchSpec)
 
     train_dataset: DatasetConfig = field(default_factory=DatasetConfig)
     valid_dataset: DatasetConfig = field(default_factory=DatasetConfig)
