@@ -323,17 +323,17 @@ class ExperimentSaveEvalControl:
         default=1, metadata={"help": "Total number of epochs to train the model."}
     )
     # Save control
-    freq_epochs: Optional[int] = field(
+    save_freq_epochs: Optional[int] = field(
         default=None,
         metadata={
             "help": "Save frequency in epochs. None disables epoch-based saving."
         },
     )
-    freq_steps: Optional[int] = field(
+    save_freq_steps: Optional[int] = field(
         default=None,
         metadata={"help": "Save frequency in steps. None disables step-based saving."},
     )
-    freq_secs: Optional[int] = field(
+    save_freq_secs: Optional[int] = field(
         default=None,
         metadata={
             "help": "Save frequency in seconds. None disables time-based saving."
