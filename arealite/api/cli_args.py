@@ -322,7 +322,23 @@ class ExperimentSaveEvalControl:
     total_train_epochs: int = field(
         default=1, metadata={"help": "Total number of epochs to train the model."}
     )
-
+    # Save control
+    freq_epochs: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Save frequency in epochs. None disables epoch-based saving."
+        },
+    )
+    freq_steps: Optional[int] = field(
+        default=None,
+        metadata={"help": "Save frequency in steps. None disables step-based saving."},
+    )
+    freq_secs: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Save frequency in seconds. None disables time-based saving."
+        },
+    )
     # Checkpointing control
     ckpt_freq_epochs: Optional[int] = field(
         default=None,
@@ -375,30 +391,6 @@ class ExperimentSaveEvalControl:
         metadata={
             "help": "Terminate training after consuming this number of samples. "
             "For benchmarking purposes only. None indicates normal training."
-        },
-    )
-
-
-@dataclass
-class SaverConfig:
-    experiment_name: str
-    trial_name: str
-    fileroot: str
-    # Save control
-    freq_epochs: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": "Save frequency in epochs. None disables epoch-based saving."
-        },
-    )
-    freq_steps: Optional[int] = field(
-        default=None,
-        metadata={"help": "Save frequency in steps. None disables step-based saving."},
-    )
-    freq_secs: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": "Save frequency in seconds. None disables time-based saving."
         },
     )
 
