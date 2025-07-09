@@ -114,6 +114,9 @@ def main_sft():
             logger.commit(epoch, step, global_step, stats_tracker.export())
             global_step += 1
 
+    engine.destroy()
+    logger.close()
+
 
 if __name__ == "__main__":
     main_sft()
