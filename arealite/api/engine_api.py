@@ -77,7 +77,7 @@ class TrainEngine(abc.ABC):
 
     def train_batch(
         self,
-        input_: Dict,
+        input_: TensorDict,
         loss_fn: Callable[[torch.Tensor, Dict], torch.Tensor],
         loss_weight_fn: Callable[[Dict], float],
     ) -> Dict[str, float]:
@@ -87,7 +87,7 @@ class TrainEngine(abc.ABC):
     @torch.no_grad()
     def eval_batch(
         self,
-        input_: Dict,
+        input_: TensorDict,
         loss_fn: Callable[[torch.Tensor, Dict], torch.Tensor],
         loss_weight_fn: Callable[[Dict], float],
     ) -> torch.Tensor | None:
@@ -97,7 +97,7 @@ class TrainEngine(abc.ABC):
     @torch.no_grad()
     def forward(
         self,
-        input_: Dict,
+        input_: TensorDict,
         output_seqlens: List[List[int]] | None = None,
         post_hook: Callable[[torch.Tensor, Dict], Any] | None = None,
         aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
