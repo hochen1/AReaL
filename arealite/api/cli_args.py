@@ -1,5 +1,4 @@
 import argparse
-import getpass
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -9,6 +8,7 @@ from hydra import compose as hydra_compose
 from hydra import initialize as hydra_init
 from omegaconf import MISSING, OmegaConf
 
+from arealite.utils.fs import get_user_tmp
 from realhf.api.cli_args import OptimizerConfig
 
 
@@ -388,13 +388,6 @@ class StatsLoggerConfig:
         default_factory=TensorBoardConfig,
         metadata={"help": "TensorBoard configuration. Only 'path' field required."},
     )
-
-
-def get_user_tmp():
-    user = getpass.getuser()
-    user_tmp = os.path.join("/home", user, ".cache", "realhf")
-    os.makedirs(user_tmp, exist_ok=True)
-    return user_tmp
 
 
 @dataclass
