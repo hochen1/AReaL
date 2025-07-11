@@ -77,7 +77,7 @@ class TrainEngine(abc.ABC):
 
     def train_batch(
         self,
-        input_: Dict,
+        input_: TensorDict,
         loss_fn: Callable[[torch.Tensor, Dict], torch.Tensor],
         loss_weight_fn: Callable[[Dict], float],
     ) -> Dict[str, float]:
@@ -87,7 +87,7 @@ class TrainEngine(abc.ABC):
     @torch.no_grad()
     def eval_batch(
         self,
-        input_: Dict,
+        input_: TensorDict,
         loss_fn: Callable[[torch.Tensor, Dict], torch.Tensor],
         loss_weight_fn: Callable[[Dict], float],
     ) -> torch.Tensor | None:
@@ -97,7 +97,7 @@ class TrainEngine(abc.ABC):
     @torch.no_grad()
     def forward(
         self,
-        input_: Dict,
+        input_: TensorDict,
         output_seqlens: List[List[int]] | None = None,
         post_hook: Callable[[torch.Tensor, Dict], Any] | None = None,
         aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
@@ -127,8 +127,21 @@ class InferenceEngine(abc.ABC):
         """Asynchronously submit a request to the inference engine. Exits immediately."""
         raise NotImplementedError()
 
-    def wait(self, count: int, timeout: float) -> TensorDict:
+    def wait(
+        self,
+        count: int,
+        timeout: float | None = None,
+        should_accept: Callable | None = None,
+    ) -> TensorDict:
         """Wait for a specified number of requests to complete, with a timeout."""
+        raise NotImplementedError()
+
+    def pause(self):
+        """Pause request submission for async rollout. Used during evaluation to prevent data over generation."""
+        raise NotImplementedError()
+
+    def resume(self):
+        """Resume request submission for async rollout."""
         raise NotImplementedError()
 
     def rollout(

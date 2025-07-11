@@ -1,24 +1,40 @@
-experiment_name: gsm8k-sft
+experiment_name: gsm8k-grpo
 trial_name: trial0
+allocation_mode: sglang.d4p1t1+d4p1t1
 n_nodes: 1
 n_gpus_per_node: 8
 cluster:
+  fileroot: /tmp/arealite/experiments
   name_resolve:
     type: nfs
     nfs_record_root: /tmp/areal/name_resolve
 seed: 1
 total_train_epochs: 1
-tokenizer_path: ${model.path}
+tokenizer_path: ${actor.path}
 
-model:
+rollout:
+  experiment_name: ${experiment_name}
+  trial_name: ${trial_name}
+  max_concurrent_rollouts: null
+  queue_size: null
+  consumer_batch_size: ${train_dataset.batch_size}
+  max_head_offpolicyness: 0
+
+gconfig:
+  min_new_tokens: 0
+  max_new_tokens: 1024
+  greedy: false
+  temperature: 1.0
+
+actor:
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   path: /storage/openpsi/models/Qwen__Qwen3-1.7B/
   init_from_scratch: false
   gradient_checkpointing: false
-  dtype: bfloat16
+  dtype: float16
   mb_spec:
-    max_tokens_per_mb: 4096
+    max_tokens_per_mb: 10240
   optimizer:
     type: adam
     lr: 2e-5
@@ -30,6 +46,29 @@ model:
     gradient_clipping: 1.0
   backend: fsdp
 
+ref:
+  experiment_name: ${experiment_name}
+  trial_name: ${trial_name}
+  path: ${actor.path}
+  init_from_scratch: false
+  dtype: ${actor.dtype}
+  mb_spec:
+    max_tokens_per_mb: 10240
+  optimizer: null
+  backend: fsdp
+
+# SGLang
+server_only: false
+sglang:
+  model_path: ${actor.path}
+  random_seed: ${seed}
+  skip_tokenizer_init: false
+  dtype: ${actor.dtype}
+  max_running_requests: null 
+  context_length: 32768
+  mem_fraction_static: 0.9
+
+# datasets
 train_dataset:
   batch_size: 128
   shuffle: true
