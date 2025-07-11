@@ -32,7 +32,7 @@ from arealite.utils.data import (
     pad_and_stack_tensors_along_first_dim,
     pad_mb_list,
     reorder_list,
-    split_packed_tensor_dict_into_mb_list,
+    split_padded_tensor_dict_into_mb_list,
     unpack_sequence,
     unsqueeze_mb_list,
 )
@@ -95,7 +95,7 @@ class FSDPEngine(TrainEngine):
         torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
         self.device = torch.device(int(os.environ["LOCAL_RANK"]))
 
-        dtype = torch.bfloat16 if self.config.bf16 else torch.float16
+        dtype = getattr(torch, self.config.dtype)
         self.model_config = AutoConfig.from_pretrained(
             pretrained_model_name_or_path=self.config.path,
             trust_remote_code=True,
@@ -323,11 +323,8 @@ class FSDPEngine(TrainEngine):
         if isinstance(input_, dict):
             input_ = TensorDict(input_, batch_size=[input_["input_ids"].shape[0]])
         input_ = amend_position_ids(input_)
-        packed_input = pack_tensor_dict(input_)
-        mb_list = split_packed_tensor_dict_into_mb_list(
-            packed_input,
-            self.config.mb_spec,
-        )
+        mb_list = split_padded_tensor_dict_into_mb_list(input_, self.config.mb_spec)
+        mb_list.mbs = [pack_tensor_dict(mb) for mb in mb_list.mbs]
         mb_list = pad_mb_list(mb_list, pad_value=0.0)
         # NOTE: We unsqueeze here because huggingface transformer models requires
         # packed input to be of shape [1, total_seqlen].
