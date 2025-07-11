@@ -38,8 +38,8 @@ def get_gsm8k_dataset(split, tokenizer, rank, world_size):
 
 
 def main_sft():
-    config, _ = load_expr_config(sys.argv[1:], SFTConfig)
-    config: SFTConfig
+    r = load_expr_config(sys.argv[1:], SFTConfig)
+    config: SFTConfig = r.config
 
     rank = int(os.getenv("RANK"))
     world_size = int(os.getenv("WORLD_SIZE"))

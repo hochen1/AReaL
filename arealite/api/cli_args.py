@@ -629,8 +629,15 @@ class GRPOConfig(BaseExperimentConfig):
     ref: PPOActorConfig = field(default_factory=PPOActorConfig)
 
 
-def parse_cli_args(argv: List[str]):
-    parser = argparse.ArgumentParser()
+@dataclass
+class ArgParseResult:
+    config: BaseExperimentConfig
+    config_file: Path
+    additional_args: Optional[argparse.Namespace] = None
+
+def parse_cli_args(argv: List[str], parser: Optional[argparse.ArgumentParser] = None) -> ArgParseResult:
+    if parser is None:
+        parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config", help="The path of the main configuration file", required=True
     )
@@ -646,8 +653,11 @@ def parse_cli_args(argv: List[str]):
         config_name=str(relpath.name).rstrip(".yaml"),
         overrides=overrides,
     )
-    return cfg, config_file
-
+    return ArgParseResult(
+        config=cfg,
+        config_file=config_file,
+        additional_args=args
+    )
 
 def to_structured_cfg(cfg, config_cls):
     # Merge with the default configuration.
@@ -657,8 +667,13 @@ def to_structured_cfg(cfg, config_cls):
     return cfg
 
 
-def load_expr_config(argv: List[str], config_cls) -> Tuple[BaseExperimentConfig, str]:
-    cfg, config_file = parse_cli_args(argv)
+def load_expr_config(
+    argv: List[str], 
+    config_cls, 
+    parser: Optional[argparse.ArgumentParser] = None
+) -> ArgParseResult:
+    r = parse_cli_args(argv, parser=parser)
+    cfg = r.config
     cfg = to_structured_cfg(cfg, config_cls=config_cls)
     cfg = OmegaConf.to_object(cfg)
     assert isinstance(cfg, BaseExperimentConfig)
@@ -668,4 +683,8 @@ def load_expr_config(argv: List[str], config_cls) -> Tuple[BaseExperimentConfig,
 
     constants.set_experiment_trial_names(cfg.experiment_name, cfg.trial_name)
     name_resolve.reconfigure(cfg.cluster.name_resolve)
-    return cfg, str(config_file)
+    return ArgParseResult(
+        config=cfg,
+        config_file=r.config_file,
+        additional_args=r.additional_args
+    )

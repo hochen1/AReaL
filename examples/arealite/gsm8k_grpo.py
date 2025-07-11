@@ -72,8 +72,8 @@ def gsm8k_reward_fn(
 
 
 def main_grpo():
-    config, _ = load_expr_config(sys.argv[1:], GRPOConfig)
-    config: GRPOConfig
+    r = load_expr_config(sys.argv[1:], GRPOConfig)
+    config: GRPOConfig = r.config
 
     rank = int(os.getenv("RANK"))
     world_size = int(os.getenv("WORLD_SIZE"))
