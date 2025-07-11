@@ -195,26 +195,29 @@ class SGLangConfig:
     @staticmethod
     def build_cmd(
         sglang_config: "SGLangConfig",
-        model_path,
-        tp_size,
-        base_gpu_id,
+        model_path: str,
+        tp_size: int,
+        base_gpu_id: int,
+        server_port: Optional[int] = None, 
         dist_init_addr: Optional[str] = None,
+        seed: Optional[int] = None,
         served_model_name: Optional[str] = None,
         skip_tokenizer_init: bool = True,
-    ):
+    ) -> str:
         from realhf.base import network, pkg_version, seeding
         from realhf.experiments.common.utils import asdict as conf_as_dict
 
         args: Dict = conf_as_dict(sglang_config)
-        args["random_seed"] = seeding.get_seed()
-
+        if server_port is not None:
+            args["port"] = server_port
         if served_model_name is None:
             served_model_name = model_path
-        host_ip = network.gethostip()
-        host = "localhost" if not sglang_config.enable_metrics else host_ip
+        host = "localhost"
         args = dict(
             host=host,
             model_path=model_path,
+            # seed
+            seed=seed if seed is not None else seeding.get_seed(),
             # Model and tokenizer
             tokenizer_path=model_path,
             tokenizer_mode="auto",
@@ -230,6 +233,7 @@ class SGLangConfig:
             base_gpu_id=base_gpu_id,
             nnodes=1,
             node_rank=0,
+            # initialization addresses and ports
             dist_init_addr=dist_init_addr,
             **args,
         )
@@ -542,6 +546,16 @@ class BaseExperimentConfig:
 class SFTConfig(BaseExperimentConfig):
     model: TrainEngineConfig = field(default_factory=TrainEngineConfig)
 
+
+@dataclass
+class GRPOConfig(BaseExperimentConfig):
+    actor: TrainEngineConfig = field(default_factory=TrainEngineConfig)
+    ref: TrainEngineConfig = field(default_factory=TrainEngineConfig)
+    rollout: InferenceEngineConfig = field(
+        default_factory=InferenceEngineConfig
+    )
+    sglang: SGLangConfig = field(default_factory=SGLangConfig)
+    
 
 def load_expr_config(argv: List[str], config_cls) -> Tuple[BaseExperimentConfig, str]:
     parser = argparse.ArgumentParser()
