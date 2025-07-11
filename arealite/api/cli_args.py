@@ -283,12 +283,12 @@ class SGLangConfig:
         host,
         port,
         dist_init_addr: Optional[str] = None,
+        sglang_version: Optional[str] = None,
     ):
-        from realhf.base import network, pkg_version, seeding
+        from realhf.base import pkg_version
         from realhf.experiments.common.utils import asdict as conf_as_dict
 
         args: Dict = conf_as_dict(sglang_config)
-
         args = dict(
             host=host,
             port=port,
@@ -309,10 +309,24 @@ class SGLangConfig:
             dist_init_addr=dist_init_addr,
             **args,
         )
+        if sglang_version:
+            version_less_than_0_4_4 = (
+                pkg_version.compare_versions(sglang_version, "0.4.4") < 0
+            )
+            version_less_than_0_4_3 = (
+                pkg_version.compare_versions(sglang_version, "0.4.3") < 0
+            )
+        elif pkg_version.is_available("sglang"):
+            version_less_than_0_4_4 = pkg_version.is_version_less("sglang", "0.4.4")
+            version_less_than_0_4_3 = pkg_version.is_version_less("sglang", "0.4.3")
+        else:
+            raise ValueError(
+                "A installed SGLang package or a specific SGLang version should be provided to build SGLang server cmd."
+            )
 
-        if pkg_version.is_version_less("sglang", "0.4.4"):
+        if version_less_than_0_4_4:
             args.pop("log_requests_level")
-        if pkg_version.is_version_less("sglang", "0.4.3"):
+        if version_less_than_0_4_3:
             args.pop("enable_nccl_nvls")
             args.pop("triton_attention_num_kv_splits")
             args.pop("cuda_graph_bs")
@@ -634,8 +648,12 @@ class ArgParseResult:
     config: BaseExperimentConfig
     config_file: Path
     additional_args: Optional[argparse.Namespace] = None
+    overrides: Optional[List[str]] = None
 
-def parse_cli_args(argv: List[str], parser: Optional[argparse.ArgumentParser] = None) -> ArgParseResult:
+
+def parse_cli_args(
+    argv: List[str], parser: Optional[argparse.ArgumentParser] = None
+) -> ArgParseResult:
     if parser is None:
         parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -654,10 +672,9 @@ def parse_cli_args(argv: List[str], parser: Optional[argparse.ArgumentParser] = 
         overrides=overrides,
     )
     return ArgParseResult(
-        config=cfg,
-        config_file=config_file,
-        additional_args=args
+        config=cfg, config_file=config_file, additional_args=args, overrides=overrides
     )
+
 
 def to_structured_cfg(cfg, config_cls):
     # Merge with the default configuration.
@@ -668,9 +685,7 @@ def to_structured_cfg(cfg, config_cls):
 
 
 def load_expr_config(
-    argv: List[str], 
-    config_cls, 
-    parser: Optional[argparse.ArgumentParser] = None
+    argv: List[str], config_cls, parser: Optional[argparse.ArgumentParser] = None
 ) -> ArgParseResult:
     r = parse_cli_args(argv, parser=parser)
     cfg = r.config
@@ -684,7 +699,5 @@ def load_expr_config(
     constants.set_experiment_trial_names(cfg.experiment_name, cfg.trial_name)
     name_resolve.reconfigure(cfg.cluster.name_resolve)
     return ArgParseResult(
-        config=cfg,
-        config_file=r.config_file,
-        additional_args=r.additional_args
+        config=cfg, config_file=r.config_file, additional_args=r.additional_args
     )

@@ -1,5 +1,6 @@
 from omegaconf import DictConfig, OmegaConf
 
+
 def find_config(config: DictConfig, name: str) -> DictConfig | None:
     # iterate through the nested DictConfig and find the first matching config with name
     for key, value in config.items():
@@ -11,12 +12,14 @@ def find_config(config: DictConfig, name: str) -> DictConfig | None:
                 return found
     return None
 
+
 def amend_config(config: DictConfig, config_cls):
     default_config = OmegaConf.structured(config_cls)
     config = OmegaConf.merge(default_config, config)
     config = OmegaConf.to_object(config)
     assert isinstance(config, config_cls)
     return config
+
 
 def find_and_amend_config(config: DictConfig, name: str, config_cls):
     # Find the config with the given name and amend it with the given config_cls
