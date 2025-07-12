@@ -95,7 +95,6 @@ class RemoteSGLangEngine(InferenceEngine):
             )
             return response.status_code == 200
         except requests.exceptions.RequestException as e:
-            print(f"Check {base_url}/metrics failed, reason: {e}")
             return False
 
     def initialize(self, addr: str | None, ft_spec: FinetuneSpec = None):

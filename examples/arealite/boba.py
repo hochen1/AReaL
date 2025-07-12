@@ -1,78 +1,106 @@
+import asyncio
 import os
 import re
 import sys
+import uuid
 
 import torch
 import torch.distributed as dist
 from datasets import Dataset, load_dataset
 from datasets.distributed import split_dataset_by_node
+from tensordict import TensorDict
 from torchdata.stateful_dataloader import StatefulDataLoader
+from transformers import PreTrainedTokenizerFast
 
-from arealite.api.cli_args import GRPOConfig, load_expr_config
-from arealite.api.io_struct import FinetuneSpec, WeightUpdateMeta
+from arealite.api.cli_args import (
+    GenerationHyperparameters,
+    GRPOConfig,
+    load_expr_config,
+)
+from arealite.api.io_struct import (
+    FinetuneSpec,
+    LLMRequest,
+    LLMResponse,
+    WeightUpdateMeta,
+)
+from arealite.api.workflow_api import RolloutWorkflow
 from arealite.engine.ppo.actor import FSDPPPOActor
 from arealite.engine.sglang_remote import RemoteSGLangEngine
+from arealite.utils.data import concat_padded_tensors
 from arealite.utils.evaluator import Evaluator
 from arealite.utils.saver import Saver
 from arealite.utils.stats_logger import StatsLogger
-from arealite.workflow.rlvr import RLVRWorkflow
 from realhf.api.core.data_api import load_hf_tokenizer
 from realhf.base import stats_tracker
 
 
-def process_gsm8k_rl_dataset(dataset: Dataset):
-    def process(sample):
-        messages = [{"role": "user", "content": sample["question"]}]
-        return {"messages": messages}
+class RLVRWorkflow(RolloutWorkflow):
+    def __init__(
+        self,
+        reward_fn,
+        gconfig: GenerationHyperparameters,
+        tokenizer: PreTrainedTokenizerFast,
+    ):
+        self.reward_fn = reward_fn
+        self.gconfig = gconfig
+        self.tokenizer = tokenizer
 
-    dataset = dataset.map(process).remove_columns(["question"])
-    return dataset
+    async def arun_episode(self, engine, data):
+        input_ids = self.tokenizer.encode(data["prompt"])
+        n_samples = self.gconfig.n_samples
+        req = LLMRequest(
+            rid=uuid.uuid4().hex,
+            input_ids=input_ids,
+            gconfig=self.gconfig.new(n_samples=1),
+        )
+        resps = await asyncio.gather(*[engine.agenerate(req) for _ in range(n_samples)])
+
+        results = []
+        for resp in resps:
+            seq = resp.input_tokens + resp.output_tokens
+            logprobs = [0] * resp.input_len + resp.output_logprobs
+            prompt_mask = [1] * resp.input_len + [0] * resp.output_len
+            versions = [-1] * resp.input_len + resp.output_versions
+
+            reward = self.reward_fn(
+                completions=self.tokenizer.decode(resp.output_tokens),
+                prompt_ids=resp.input_tokens,
+                completion_ids=resp.output_tokens,
+                **data,
+            )
+            res = dict(
+                # unsqueeze to add an additional batch dimension
+                input_ids=torch.tensor(seq).unsqueeze(0),
+                prompt_mask=torch.tensor(prompt_mask).unsqueeze(0),
+                logprobs=torch.tensor(logprobs).unsqueeze(0),
+                versions=torch.tensor(versions).unsqueeze(0),
+                attention_mask=torch.ones(len(seq)).unsqueeze(0),
+                # reward
+                rewards=torch.tensor([reward]),
+            )
+            results.append(TensorDict(res, batch_size=[1]))
+
+        return concat_padded_tensors(results)
 
 
-def get_gsm8k_dataset(split, rank, world_size):
-    dataset = load_dataset(path="openai/gsm8k", name="main", split=split)
-    dataset = split_dataset_by_node(dataset, rank=rank, world_size=world_size)
-    return process_gsm8k_rl_dataset(dataset)
+def get_boba_math_dataset(rank, world_size):
+    dataset = load_dataset(
+        path="json",
+        split="train",
+        data_files="/storage/openpsi/users/xushusheng.xss/training_data/boba_106k_0319.jsonl",
+    )
+    return split_dataset_by_node(dataset, rank=rank, world_size=world_size)
 
 
-# Adapted from verl.
-def extract_solution(solution_str, method="strict") -> str | None:
-    assert method in ["strict", "flexible"]
+def boba_reward_fn(
+    prompt, completions, prompt_ids, completion_ids, query_id, solutions, **kwargs
+):
+    from realhf.impl.dataset.math_parser import process_results
 
-    final_answer = None
-    if method == "strict":
-        # this also tests the formatting of the model
-        solutions = re.findall("#### (\\-?[0-9\\.\\,]+)", solution_str)
-        if len(solutions) == 0:
-            final_answer = None
-        else:
-            # take the last solution
-            final_answer = solutions[-1].replace(",", "").replace("$", "")
-    elif method == "flexible":
-        answer = re.findall("(\\-?[0-9\\.\\,]+)", solution_str)
-        final_answer = None
-        if len(answer) == 0:
-            # no reward is there is no answer
-            pass
-        else:
-            invalid_str = ["", "."]
-            # find the last number that is not '.'
-            for final_answer in reversed(answer):
-                if final_answer not in invalid_str:
-                    break
-    return final_answer
-
-
-def gsm8k_reward_fn(prompt, completions, prompt_ids, completion_ids, answer, **kwargs):
-    from realhf.impl.dataset.math_parser import extract_answer
-
-    sol = extract_answer(completions, data_name="math")
-    ans = extract_solution(solution_str=answer, method="strict")
-    if sol is None:
-        return 0
-    if ans is None:
-        return 0
-    return int(sol.strip() == ans.strip())
+    label = 0
+    for sol in solutions:
+        label = label or process_results(completions, sol)[0]
+    return label
 
 
 def main_grpo():
@@ -85,20 +113,12 @@ def main_grpo():
 
     # Create dataset and dataloaders
     train_dataloader = StatefulDataLoader(
-        get_gsm8k_dataset("train", rank, world_size),
+        get_boba_math_dataset(rank, world_size),
         batch_size=config.train_dataset.batch_size // world_size,
         shuffle=config.train_dataset.shuffle,
         num_workers=config.train_dataset.num_workers,
         collate_fn=lambda x: x,
         drop_last=config.train_dataset.drop_last,
-    )
-    valid_dataloader = StatefulDataLoader(
-        get_gsm8k_dataset("test", rank, world_size),
-        batch_size=config.valid_dataset.batch_size // world_size,
-        shuffle=config.valid_dataset.shuffle,
-        num_workers=config.valid_dataset.num_workers,
-        collate_fn=lambda x: x,
-        drop_last=config.valid_dataset.drop_last,
     )
     ft_spec = FinetuneSpec(
         total_train_epochs=config.total_train_epochs,
@@ -109,10 +129,6 @@ def main_grpo():
     # Initialize inference engine
     rollout = RemoteSGLangEngine(config.rollout)
     rollout.initialize(None, ft_spec)
-    eval_rollout = RemoteSGLangEngine(config.rollout)
-    eval_rollout.initialize(None, ft_spec)
-    # NOTE: set a large version such that eval does not have any offpolicyness control
-    eval_rollout.set_version(int(1e12))
 
     # Initialize train engine
     actor = FSDPPPOActor(config=config.actor)
@@ -128,10 +144,7 @@ def main_grpo():
     if tokenizer.eos_token_id not in config.gconfig.stop_token_ids:
         config.gconfig.stop_token_ids.append(tokenizer.eos_token_id)
     workflow = RLVRWorkflow(
-        reward_fn=gsm8k_reward_fn,
-        gconfig=config.gconfig,
-        tokenizer=tokenizer,
-        enable_thinking=False,
+        reward_fn=boba_reward_fn, gconfig=config.gconfig, tokenizer=tokenizer
     )
 
     # Run training.
@@ -209,42 +222,12 @@ def main_grpo():
         with stats_tracker.record_timing("save"):
             saver.save(actor, epoch, step, global_step)
 
-        with stats_tracker.record_timing("eval"):
-
-            def evaluate_fn():
-                rollout.pause()
-                cnt = 0
-                for data in valid_dataloader:
-                    for item in data:
-                        eval_rollout.submit(item, workflow)
-                        cnt += 1
-                batch = eval_rollout.wait(cnt, timeout=None)
-                rewards = batch["rewards"].float().to(actor.device)
-                with stats_tracker.scope("grpo-eval"):
-                    stats_tracker.denominator(
-                        n_seqs=torch.ones(
-                            rewards.shape[0],
-                            device=rewards.device,
-                            dtype=torch.bool,
-                        )
-                    )
-                    stats_tracker.stat(task_reward=rewards, denominator="n_seqs")
-                rollout.resume()
-
-            evaluator.evaluate(
-                evaluate_fn,
-                epoch,
-                step,
-                global_step,
-            )
-
         logger.commit(epoch, step, global_step, stats)
 
     actor.destroy()
     if ref is not None:
         ref.destroy()
     rollout.destroy()
-    eval_rollout.destroy()
     logger.close()
     dist.destroy_process_group()
 

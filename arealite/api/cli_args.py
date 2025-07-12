@@ -756,7 +756,7 @@ def parse_cli_args(argv: List[str]):
     relpath = Path(os.path.relpath(str(config_file), Path(__file__).parent.absolute()))
     hydra_init(config_path=str(relpath.parent), job_name="app", version_base=None)
     cfg = hydra_compose(
-        config_name=str(relpath.name).rstrip(".yaml"),
+        config_name=str(relpath.name).split(".yaml")[0],
         overrides=overrides,
     )
     return cfg, config_file

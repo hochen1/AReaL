@@ -110,11 +110,11 @@ def pad_input(hidden_states, indices, batch, seqlen):
 
 
 def concat_padded_tensors(
-    tensor_dicts: List[Dict[str, torch.Tensor]], pad_value: float = 0.0
-) -> Dict[str, torch.Tensor]:
+    tensor_dicts: List[TensorDict], pad_value: float = 0.0
+) -> TensorDict:
     """Concatenate and pad tensors from multiple padded tensor dictionaries."""
     if not tensor_dicts:
-        return {}
+        return TensorDict()
 
     # Find max sequence length across all dictionaries
     lens = []
@@ -156,7 +156,7 @@ def concat_padded_tensors(
         result[key] = torch.cat(tensors_to_concat, dim=0)
     if "attention_mask" not in result:
         result["attention_mask"] = attn_mask
-    return result
+    return TensorDict(result, batch_size=[len(lens)])
 
 
 def to_device(data: Dict[str, torch.Tensor | Any], device) -> Dict[str, torch.Tensor]:
