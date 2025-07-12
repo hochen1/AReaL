@@ -141,85 +141,102 @@ def main_grpo():
 
     total_epochs = config.total_train_epochs
     steps_per_epoch = len(train_dataloader)
+    max_steps = total_epochs * steps_per_epoch
 
     logger.info(f"total_epochs={total_epochs} step_per_epoch={steps_per_epoch}")
-    global_step = 0
-    for epoch in range(total_epochs):
-        for step, data in enumerate(train_dataloader):
+    data_generator = iter(train_dataloader)
+    for global_step in range(max_steps):
+        epoch = global_step // steps_per_epoch
+        step = global_step % steps_per_epoch
 
-            with stats_tracker.record_timing("rollout"):
+        with stats_tracker.record_timing("rollout"):
+            if config.async_training:
+                batch = rollout.prepare_batch(
+                    data_generator,
+                    train_dataloader,
+                    workflow=workflow,
+                )
+            else:
+                try:
+                    data = next(data_generator)
+                except StopIteration:
+                    data_generator = iter(train_dataloader)
+                    data = next(data_generator)
                 batch = rollout.rollout(data, workflow=workflow)
 
-            batch = batch.to(actor.device)
+        batch = batch.to(actor.device)
 
-            if config.actor.recompute_logprob:
-                with stats_tracker.record_timing("recompute_logp"):
-                    batch["logprobs"] = actor.compute_logp(batch)
+        if config.actor.recompute_logprob:
+            with stats_tracker.record_timing("recompute_logp"):
+                logp = actor.compute_logp(batch)
+                if not config.actor.use_decoupled_loss:
+                    batch["logprobs"] = logp
+                else:
+                    batch["prox_logp"] = logp
 
-            if ref is not None:
-                with stats_tracker.record_timing("ref_logp"):
-                    batch["ref_logp"] = ref.compute_logp(batch)
+        if ref is not None:
+            with stats_tracker.record_timing("ref_logp"):
+                batch["ref_logp"] = ref.compute_logp(batch)
 
-            with stats_tracker.record_timing("compute_advantage"):
-                actor.compute_advantages(batch)
+        with stats_tracker.record_timing("compute_advantage"):
+            actor.compute_advantages(batch)
 
-            with (
-                stats_tracker.record_timing("train_step"),
-                stats_tracker.scope("grpo_actor"),
-            ):
-                stats = actor.ppo_update(batch)
-                actor.step_lr_scheduler()
+        with (
+            stats_tracker.record_timing("train_step"),
+            stats_tracker.scope("grpo_actor"),
+        ):
+            stats = actor.ppo_update(batch)
+            actor.step_lr_scheduler()
 
-            with stats_tracker.record_timing("update_weights"):
-                meta = WeightUpdateMeta(
-                    type="disk",
-                    path=os.path.join(config.cluster.fileroot, "update_weights"),
-                    alloc_mode=None,
-                    comm_backend=None,
-                    model_version=global_step + 1,
-                )
-                if dist.get_rank() == 0:
-                    future = rollout.update_weights(meta)
-                actor.upload_weights(meta)
-                if dist.get_rank() == 0:
-                    future.result()
-                rollout.set_version(global_step + 1)
-                dist.barrier()
+        with stats_tracker.record_timing("update_weights"):
+            meta = WeightUpdateMeta(
+                type="disk",
+                path=os.path.join(config.cluster.fileroot, "update_weights"),
+                alloc_mode=None,
+                comm_backend=None,
+                model_version=global_step + 1,
+            )
+            if dist.get_rank() == 0:
+                future = rollout.update_weights(meta)
+            actor.upload_weights(meta)
+            if dist.get_rank() == 0:
+                future.result()
+            rollout.set_version(global_step + 1)
+            dist.barrier()
 
-            with stats_tracker.record_timing("save"):
-                saver.save(actor, epoch, step, global_step)
+        with stats_tracker.record_timing("save"):
+            saver.save(actor, epoch, step, global_step)
 
-            with stats_tracker.record_timing("eval"):
+        with stats_tracker.record_timing("eval"):
 
-                def evaluate_fn():
-                    rollout.pause()
-                    cnt = 0
-                    for data in valid_dataloader:
-                        for item in data:
-                            eval_rollout.submit(item, workflow)
-                            cnt += 1
-                    batch = eval_rollout.wait(cnt, timeout=None)
-                    rewards = batch["rewards"].float()
-                    with stats_tracker.scope("grpo-eval"):
-                        stats_tracker.denominator(
-                            n_seqs=torch.ones(
-                                rewards.shape[0],
-                                device=rewards.device,
-                                dtype=torch.bool,
-                            )
+            def evaluate_fn():
+                rollout.pause()
+                cnt = 0
+                for data in valid_dataloader:
+                    for item in data:
+                        eval_rollout.submit(item, workflow)
+                        cnt += 1
+                batch = eval_rollout.wait(cnt, timeout=None)
+                rewards = batch["rewards"].float().to(actor.device)
+                with stats_tracker.scope("grpo-eval"):
+                    stats_tracker.denominator(
+                        n_seqs=torch.ones(
+                            rewards.shape[0],
+                            device=rewards.device,
+                            dtype=torch.bool,
                         )
-                        stats_tracker.stat(task_reward=rewards, denominator="n_seqs")
-                    rollout.resume()
+                    )
+                    stats_tracker.stat(task_reward=rewards, denominator="n_seqs")
+                rollout.resume()
 
-                evaluator.evaluate(
-                    evaluate_fn,
-                    epoch,
-                    step,
-                    global_step,
-                )
+            evaluator.evaluate(
+                evaluate_fn,
+                epoch,
+                step,
+                global_step,
+            )
 
-            logger.commit(epoch, step, global_step, stats)
-            global_step += 1
+        logger.commit(epoch, step, global_step, stats)
 
     actor.destroy()
     if ref is not None:

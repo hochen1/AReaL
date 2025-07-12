@@ -6,12 +6,13 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from queue import Empty, Full, Queue
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional
 
 import aiohttp
 import requests
 import torch.distributed as dist
 from tensordict import TensorDict
+from torchdata.stateful_dataloader import StatefulDataLoader
 
 from arealite.api.cli_args import InferenceEngineConfig
 from arealite.api.engine_api import InferenceEngine
@@ -95,6 +96,7 @@ class RemoteSGLangEngine(InferenceEngine):
             return False
 
     def initialize(self, addr: str | None, ft_spec: FinetuneSpec = None):
+        self.rollout_tasks: Dict[str, asyncio.Task] = {}
         self.rollout_thread = threading.Thread(target=self._rollout_thread)
         self.rollout_thread.start()
 
@@ -119,10 +121,8 @@ class RemoteSGLangEngine(InferenceEngine):
 
     async def _rollout_thread_async(self):
         pending_data = []
-
-        rollout_tasks: Dict[str, asyncio.Task] = {}
+        rollout_tasks = self.rollout_tasks
         rid = 0
-
         try:
             while not self.exiting.is_set():
                 # Load next data from controller
@@ -136,30 +136,14 @@ class RemoteSGLangEngine(InferenceEngine):
                         break
 
                 # Check capacity
-                if dist.is_initialized():
-                    world_size = dist.get_world_size()
-                else:
-                    world_size = 1
-
-                max_concurrent_rollouts = max(
-                    1, self.config.max_concurrent_rollouts // world_size
-                )
-                capacity = max_concurrent_rollouts - len(rollout_tasks)
-                # Staleness control
-                version = self.get_version()
-                ofp = self.config.max_head_offpolicyness
-                with self.lock:
-                    sample_cnt = self.rollout_stat.accepted + self.rollout_stat.running
-                consumer_bs = max(1, self.config.consumer_batch_size // world_size)
-                capacity = min(capacity, (ofp + version + 1) * consumer_bs - sample_cnt)
-
+                capacity = self.get_capacity()
                 # Create new rollout task
                 while capacity > 0 and pending_data and not self.paused.is_set():
                     task = asyncio.create_task(
                         workflow.arun_episode(self, pending_data.pop(0)), name=str(rid)
                     )
-                    rollout_tasks[str(rid)] = task
                     with self.lock:
+                        rollout_tasks[str(rid)] = task
                         self.rollout_stat.submitted += 1
                         self.rollout_stat.running += 1
                         if self.config.enable_rollout_tracing:
@@ -173,7 +157,8 @@ class RemoteSGLangEngine(InferenceEngine):
                     rid += 1
 
                 # Wait for rollout completion
-                tasks = list(rollout_tasks.values())
+                with self.lock:
+                    tasks = list(rollout_tasks.values())
                 done = []
                 if tasks:
                     done, _ = await asyncio.wait(
@@ -191,8 +176,9 @@ class RemoteSGLangEngine(InferenceEngine):
                     traj = await task
                     traj: TensorDict
                     task_rid = task.get_name()
-                    rollout_tasks.pop(task_rid)
-                    self.rollout_stat.accepted += 1
+                    with self.lock:
+                        rollout_tasks.pop(task_rid)
+                        self.rollout_stat.accepted += 1
 
                     try:
                         self.output_queue.put_nowait(traj)
@@ -214,13 +200,14 @@ class RemoteSGLangEngine(InferenceEngine):
             traceback.print_exc()
         finally:
             # Cancel remaining tasks
-            for task in rollout_tasks.values():
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
+            with self.lock:
+                for task in rollout_tasks.values():
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
 
     def choose_server(self) -> str:
         if self.config.schedule_policy == "round_robin":
@@ -428,6 +415,25 @@ class RemoteSGLangEngine(InferenceEngine):
                 f"during updating weights for server {addr}"
             )
 
+    def get_capacity(self):
+        if dist.is_initialized():
+            world_size = dist.get_world_size()
+        else:
+            world_size = 1
+
+        max_concurrent_rollouts = max(
+            1, self.config.max_concurrent_rollouts // world_size
+        )
+        capacity = max_concurrent_rollouts - len(self.rollout_tasks)
+        # Staleness control
+        version = self.get_version()
+        ofp = self.config.max_head_offpolicyness
+        with self.lock:
+            sample_cnt = self.rollout_stat.accepted + self.rollout_stat.running
+        consumer_bs = max(1, self.config.consumer_batch_size // world_size)
+        capacity = min(capacity, (ofp + version + 1) * consumer_bs - sample_cnt)
+        return capacity
+
     def submit(self, data: Dict[str, Any], workflow: "RolloutWorkflow") -> None:
         try:
             self.input_queue.put_nowait((data, workflow))
@@ -477,6 +483,27 @@ class RemoteSGLangEngine(InferenceEngine):
         for item in data:
             self.submit(item, workflow)
         return self.wait(count=len(data))
+
+    def prepare_batch(
+        self,
+        data_generator: Iterator,
+        dataloader: StatefulDataLoader,
+        workflow: "RolloutWorkflow",
+    ):
+        assert dataloader.batch_size is not None
+        while True:
+            if self.get_capacity() + dataloader.batch_size > 0:
+                try:
+                    data = next(data_generator)
+                except StopIteration:
+                    data_generator = iter(dataloader)
+                    data = next(data_generator)
+                for item in data:
+                    self.submit(item, workflow=workflow)
+            try:
+                return self.wait(dataloader.batch_size, timeout=1)
+            except TimeoutError:
+                pass
 
     def pause(self):
         self.paused.set()
