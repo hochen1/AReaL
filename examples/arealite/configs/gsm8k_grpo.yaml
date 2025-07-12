@@ -50,7 +50,6 @@ actor:
     warmup_steps_proportion: 0.001
   backend: fsdp
 
-  async_training: true
   group_size: ${gconfig.n_samples}
   group_adv_norm: false
   eps_clip: 0.4

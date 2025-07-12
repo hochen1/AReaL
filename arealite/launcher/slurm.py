@@ -160,7 +160,7 @@ echo head_node_ip=$head_node_ip
 wait
 """
 
-SRUN_CMD_TEMPLATE = """srun --overlap --mpi=pmi2 -K -l --chdir $PWD --nodelist=${{nodes_array[{node_id}]}} \\
+SRUN_CMD_TEMPLATE: str = """srun --overlap --mpi=pmi2 -K -l --chdir $PWD --nodelist=${{nodes_array[{node_id}]}} \\
     --nodes={nodes} --ntasks={ntasks} --gres=gpu:{n_gpus_per_node} --cpus-per-task={cpus_per_task} \\
     --mem-per-cpu={mem_per_cpu}M {apptainer_name} exec {apptainer_options} --bind {container_mounts} \\
     {container_env_strings} \\
@@ -357,7 +357,7 @@ class SlurmLauncher:
             # Prepare the command for each job in the array
             job_cmd = cmd[i]
             # FIXME: only for debugging, remove and replace new image
-            job_cmd = f'bash -c "pip3 install -U gymnasium torchdata tensordict hf-xet; {job_cmd}"'
+            job_cmd = f'bash -c "pip3 install -r requirements.txt; {job_cmd}"'
 
             srun_cmd = SRUN_CMD_TEMPLATE.format(
                 nodes=1,
