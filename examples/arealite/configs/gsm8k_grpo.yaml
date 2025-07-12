@@ -11,6 +11,7 @@ cluster:
 seed: 1
 total_train_epochs: 10
 tokenizer_path: ${actor.path}
+async_training: true
 
 rollout:
   experiment_name: ${experiment_name}
