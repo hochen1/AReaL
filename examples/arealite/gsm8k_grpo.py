@@ -220,8 +220,6 @@ def main_grpo():
 
             logger.commit(epoch, step, global_step, stats)
             global_step += 1
-            break
-        break
 
     actor.destroy()
     if ref is not None:
