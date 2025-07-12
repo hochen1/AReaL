@@ -9,42 +9,54 @@ cluster:
     type: nfs
     nfs_record_root: /tmp/areal/name_resolve
 seed: 1
-total_train_epochs: 1
+total_train_epochs: 10
 tokenizer_path: ${actor.path}
 
 rollout:
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
-  max_concurrent_rollouts: null
+  max_concurrent_rollouts: 256
   queue_size: null
   consumer_batch_size: ${train_dataset.batch_size}
   max_head_offpolicyness: 0
 
 gconfig:
+  n_samples: 4
   min_new_tokens: 0
-  max_new_tokens: 1024
+  max_new_tokens: 512
   greedy: false
   temperature: 1.0
 
 actor:
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
-  path: /storage/openpsi/models/Qwen__Qwen3-1.7B/
+  path: /storage/openpsi/models/Qwen__Qwen2-1.5B-Instruct/
   init_from_scratch: false
   gradient_checkpointing: false
-  dtype: float16
+  dtype: bfloat16
   mb_spec:
     max_tokens_per_mb: 10240
   optimizer:
     type: adam
-    lr: 2e-5
-    weight_decay: 0.05
+    lr: 1e-6
+    weight_decay: 0.01
     beta1: 0.9
-    beta2: 0.95
-    eps: 1e-5
-    lr_scheduler_type: cosine
+    beta2: 0.999
+    eps: 1e-8
+    lr_scheduler_type: constant
     gradient_clipping: 1.0
+    warmup_steps_proportion: 0.001
   backend: fsdp
+
+  group_size: ${gconfig.n_samples}
+  group_adv_norm: false
+  eps_clip: 0.2
+  temperature: ${gconfig.temperature}
+  reward_scaling: 10.0
+  reward_bias: -0.5
+  kl_ctl: 0.0
+  ppo_n_minibatches: 4
+  recompute_logprob: true
 
 ref:
   experiment_name: ${experiment_name}
@@ -62,7 +74,7 @@ server_only: false
 sglang:
   model_path: ${actor.path}
   random_seed: ${seed}
-  skip_tokenizer_init: false
+  skip_tokenizer_init: true
   dtype: ${actor.dtype}
   max_running_requests: null 
   context_length: 32768
@@ -70,12 +82,12 @@ sglang:
 
 # datasets
 train_dataset:
-  batch_size: 128
+  batch_size: 1024
   shuffle: true
   pin_memory: true
 
 valid_dataset: 
-  batch_size: 128
+  batch_size: 1024
   shuffle: true
   pin_memory: true
 
@@ -100,8 +112,8 @@ evaluator:
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
-  freq_epochs: null
-  freq_steps: 1
+  freq_epochs: 1
+  freq_steps: null
   freq_secs: null
 
 stats_logger:

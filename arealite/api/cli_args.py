@@ -9,7 +9,6 @@ from hydra import initialize as hydra_init
 from omegaconf import MISSING, OmegaConf
 
 from arealite.utils.fs import get_user_tmp
-from realhf.api.cli_args import OptimizerConfig
 
 
 @dataclass
@@ -81,6 +80,64 @@ class GenerationHyperparameters:
 
 
 # Train Engine Configs
+
+
+@dataclass
+class OptimizerConfig:
+    """Configuration for model optimization during training.
+
+    Note:
+        Set type to "empty" for models that won't be trained.
+    """
+
+    type: str = field(
+        default="adam",
+        metadata={"help": "Optimizer type", "choices": ["adam", "empty"]},
+    )
+    lr: float = field(default=2e-5, metadata={"help": "Learning rate"})
+    weight_decay: float = field(default=0.05, metadata={"help": "Weight decay"})
+    beta1: float = field(default=0.9, metadata={"help": "Adam beta1 parameter"})
+    beta2: float = field(default=0.95, metadata={"help": "Adam beta2 parameter"})
+    eps: float = field(default=1e-5, metadata={"help": "Adam epsilon parameter"})
+    min_lr_ratio: float = field(
+        default=0.0,
+        metadata={
+            "help": "Minimum learning rate ratio after annealing",
+        },
+    )
+    lr_scheduler_type: str = field(
+        default="constant",
+        metadata={
+            "help": "Learning rate scheduler type",
+            "choices": ["linear", "cosine", "constant"],
+        },
+    )
+    warmup_steps_proportion: float = field(
+        default=0.001,
+        metadata={
+            "help": "Proportion of training steps for warmup",
+        },
+    )
+    offload: bool = field(
+        default=False, metadata={"help": "Enable optimizer state offloading"}
+    )
+    initial_loss_scale: float = field(
+        default=2**32, metadata={"help": "Initial loss scaling factor"}
+    )
+    min_loss_scale: float = field(
+        default=1.0, metadata={"help": "Minimum loss scaling factor"}
+    )
+    loss_scale_window: float = field(
+        default=5, metadata={"help": "Window size for loss scaling adjustment"}
+    )
+    hysteresis: int = field(
+        default=2, metadata={"help": "Hysteresis (scaling factor) for loss scaling"}
+    )
+    gradient_clipping: float = field(
+        default=1.0, metadata={"help": "Gradient clipping threshold"}
+    )
+
+
 @dataclass
 class FSDPWrapPolicy:
     transformer_layer_cls_to_wrap: Optional[List[str]] = field(
@@ -284,7 +341,7 @@ class SGLangConfig:
         port,
         dist_init_addr: Optional[str] = None,
     ):
-        from realhf.base import network, pkg_version, seeding
+        from realhf.base import pkg_version
         from realhf.experiments.common.utils import asdict as conf_as_dict
 
         args: Dict = conf_as_dict(sglang_config)
@@ -361,6 +418,7 @@ class InferenceEngineConfig:
             "the request will not be accepted.",
         },
     )
+    enable_rollout_tracing: bool = field(default=False)
     schedule_policy: str = field(
         default="round_robin",
         metadata={"help": "Request scheduling policy", "choices": ["round_robin"]},
@@ -663,8 +721,11 @@ def load_expr_config(argv: List[str], config_cls) -> Tuple[BaseExperimentConfig,
     assert isinstance(cfg, BaseExperimentConfig)
 
     # Setup environment
-    from realhf.base import constants, name_resolve
+    from realhf.base import constants, name_resolve, names
 
     constants.set_experiment_trial_names(cfg.experiment_name, cfg.trial_name)
     name_resolve.reconfigure(cfg.cluster.name_resolve)
+    name_resolve.clear_subtree(
+        names.trial_root(experiment_name=cfg.experiment_name, trial_name=cfg.trial_name)
+    )
     return cfg, str(config_file)

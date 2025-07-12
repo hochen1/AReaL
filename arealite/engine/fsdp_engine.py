@@ -1,6 +1,7 @@
 import gc
 import os
 import time
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 import torch
@@ -101,13 +102,23 @@ class FSDPEngine(TrainEngine):
             trust_remote_code=True,
         )
         self.tokenizer = load_hf_tokenizer(self.config.path)
+        tik = time.perf_counter()
         with torch.device("cuda"):
-            # initialize scratch model from config
-            model = AutoModelForCausalLM.from_config(
-                self.model_config,
-                torch_dtype=dtype,
-                attn_implementation=self.config.attn_impl,
-            )
+            if self.config.init_from_scratch:
+                # initialize scratch model from config
+                model = AutoModelForCausalLM.from_config(
+                    self.model_config,
+                    torch_dtype=dtype,
+                    attn_implementation=self.config.attn_impl,
+                )
+            else:
+                model = AutoModelForCausalLM.from_pretrained(
+                    pretrained_model_name_or_path=self.config.path,
+                    trust_remote_code=True,
+                    torch_dtype=dtype,
+                    attn_implementation=self.config.attn_impl,
+                )
+        logger.info(f"Model creation and loading time: {time.perf_counter() - tik}")
 
         # Simple auto wrap policy
         self.mixed_precision_policy = MixedPrecisionPolicy(
@@ -129,23 +140,14 @@ class FSDPEngine(TrainEngine):
         }
 
         # Wrap with FSDP2
+        tik = time.perf_counter()
         apply_fsdp2(model, fsdp_kwargs, self.config.fsdp.wrap_policy)
+        logger.info(f"Applying FSDP2 time: {time.perf_counter() - tik}")
         self.model = model
-
-        if not self.config.init_from_scratch:
-            # Load model from a initial checkpoint path,
-            # which should only be a huggingface checkpoint.
-            load_meta = SaveLoadMeta(
-                path=self.config.path,
-                weight_format="hf",
-                with_optim=False,
-                tokenizer=None,
-                base_model_path=self.config.path,
-            )
-            self.load(load_meta)
 
         # Set up optimizer
         if self.optimizer_config is not None:
+            tik = time.perf_counter()
             assert (
                 self.optimizer_config.type == "adam"
             ), "Only AdamW optimizer is supported in this engine."
@@ -189,6 +191,7 @@ class FSDPEngine(TrainEngine):
                 raise ValueError(
                     f"Unknown lr scheduler type {self.optimizer_config.lr_scheduler_type}"
                 )
+            logger.info(f"Create optimizer time: {time.perf_counter() - tik}")
 
         self.initialized = True
 
@@ -300,7 +303,9 @@ class FSDPEngine(TrainEngine):
                     self.config.trial_name,
                     meta.model_version,
                 )
-                name_resolve.add(update_name, str(time.time_ns()), keepalive_ttl=120)
+                name_resolve.add(
+                    update_name, str(datetime.now().timestamp()), keepalive_ttl=120
+                )
         else:
             raise ValueError(f"Unknown weight update type {meta.type}")
 

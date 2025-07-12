@@ -1,4 +1,3 @@
-import argparse
 import getpass
 import os
 import re
@@ -15,13 +14,7 @@ from arealite.api.cli_args import SGLangConfig, parse_cli_args, to_structured_cf
 from arealite.api.io_struct import AllocationMode, AllocationType
 from arealite.utils.network import find_free_ports, gethostip
 from realhf.base import gpu_utils, logging
-from realhf.scheduler.client import (
-    JobException,
-    JobInfo,
-    JobState,
-    SchedulerClient,
-    SchedulerError,
-)
+from realhf.scheduler.client import JobException, JobInfo, JobState
 
 logger = logging.getLogger("Local Scheduler")
 
@@ -286,7 +279,7 @@ def main_local():
     if not cfg.server_only:
         launcher.submit(
             job_name="trainer",
-            cmd=f"torchrun --nnodes 1 --nproc-per-node {alloc_mode.train_world_size} {' '.join(sys.argv[1:])}",
+            cmd=f"torchrun --nnodes 1 --nproc-per-node {alloc_mode.train_world_size} --standalone {' '.join(sys.argv[1:])}",
             gpu=alloc_mode.train_world_size,
             env_vars=dict(AREAL_LLM_SERVER_ADDRS=",".join(server_addrs)),
         )

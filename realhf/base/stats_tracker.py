@@ -193,7 +193,7 @@ class DistributedStatsTracker:
         values = self.stats[key]
         if key not in self.denominators:
             x = sum([x.sum() for x in values])
-            if reduce_group is not None:
+            if dist.is_initialized():
                 dist.all_reduce(x, group=reduce_group)
         else:
             denominator = self.denominators[key]
@@ -205,7 +205,7 @@ class DistributedStatsTracker:
             for v, d in zip(values, self.stats[denominator]):
                 xs.append(torch.where(d, v, 0.0).sum())
             x = sum(xs)
-            if reduce_group is not None:
+            if dist.is_initialized():
                 dist.all_reduce(x, group=reduce_group)
         return float(x)
 
@@ -221,7 +221,7 @@ class DistributedStatsTracker:
             ds.append(d.sum())
         x = sum(xs)
         d = sum(ds)
-        if reduce_group is not None:
+        if dist.is_initialized():
             dist.all_reduce(x, group=reduce_group)
             dist.all_reduce(d, group=reduce_group)
         if d == 0:
@@ -237,7 +237,7 @@ class DistributedStatsTracker:
         for v, d in zip(values, self.stats[denominator]):
             xs.append(torch.where(d, v, float("inf")).min())
         x = min(xs)
-        if reduce_group is not None:
+        if dist.is_initialized():
             dist.all_reduce(x, group=reduce_group, op=dist.ReduceOp.MIN)
         if torch.isinf(x):
             return None
@@ -252,7 +252,7 @@ class DistributedStatsTracker:
         for v, d in zip(values, self.stats[denominator]):
             xs.append(torch.where(d, v, -float("inf")).max())
         x = max(xs)
-        if reduce_group is not None:
+        if dist.is_initialized():
             dist.all_reduce(x, group=reduce_group, op=dist.ReduceOp.MAX)
         if torch.isinf(x):
             return None

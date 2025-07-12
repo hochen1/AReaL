@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Callable
 
 from arealite.api.cli_args import EvaluatorConfig
 from arealite.api.io_struct import FinetuneSpec

@@ -1,6 +1,7 @@
 import os
 import sys
 
+import torch.distributed as dist
 from datasets import Dataset, load_dataset
 from datasets.distributed import split_dataset_by_node
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -115,6 +116,7 @@ def main_sft():
 
     engine.destroy()
     logger.close()
+    dist.destroy_process_group()
 
 
 if __name__ == "__main__":

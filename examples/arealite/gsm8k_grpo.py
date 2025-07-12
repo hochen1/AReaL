@@ -3,12 +3,13 @@ import re
 import sys
 
 import torch
+import torch.distributed as dist
 from datasets import Dataset, load_dataset
 from datasets.distributed import split_dataset_by_node
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from arealite.api.cli_args import GRPOConfig, load_expr_config
-from arealite.api.io_struct import FinetuneSpec
+from arealite.api.io_struct import FinetuneSpec, WeightUpdateMeta
 from arealite.engine.ppo.actor import FSDPPPOActor
 from arealite.engine.sglang_remote import RemoteSGLangEngine
 from arealite.utils.evaluator import Evaluator
@@ -22,7 +23,7 @@ from realhf.base import stats_tracker
 def process_gsm8k_rl_dataset(dataset: Dataset):
     def process(sample):
         messages = [{"role": "user", "content": sample["question"]}]
-        return {"messages": messages, "method": "strict"}
+        return {"messages": messages}
 
     dataset = dataset.map(process).remove_columns(["question"])
     return dataset
@@ -35,7 +36,7 @@ def get_gsm8k_dataset(split, rank, world_size):
 
 
 # Adapted from verl.
-def extract_solution(solution_str, method="strict"):
+def extract_solution(solution_str, method="strict") -> str | None:
     assert method in ["strict", "flexible"]
 
     final_answer = None
@@ -62,13 +63,16 @@ def extract_solution(solution_str, method="strict"):
     return final_answer
 
 
-def gsm8k_reward_fn(
-    prompt, completions, prompt_ids, completion_ids, answer, method, **kwargs
-):
-    sol = extract_solution(solution_str=completions, method=method)
+def gsm8k_reward_fn(prompt, completions, prompt_ids, completion_ids, answer, **kwargs):
+    from realhf.impl.dataset.math_parser import extract_answer
+
+    sol = extract_answer(completions, data_name="math")
+    ans = extract_solution(solution_str=answer, method="strict")
     if sol is None:
         return 0
-    return int(sol == answer)
+    if ans is None:
+        return 0
+    return int(sol.strip() == ans.strip())
 
 
 def main_grpo():
@@ -107,6 +111,8 @@ def main_grpo():
     rollout.initialize(None, ft_spec)
     eval_rollout = RemoteSGLangEngine(config.rollout)
     eval_rollout.initialize(None, ft_spec)
+    # NOTE: set a large version such that eval does not have any offpolicyness control
+    eval_rollout.set_version(int(1e12))
 
     # Initialize train engine
     actor = FSDPPPOActor(config=config.actor)
@@ -122,7 +128,10 @@ def main_grpo():
     if tokenizer.eos_token_id not in config.gconfig.stop_token_ids:
         config.gconfig.stop_token_ids.append(tokenizer.eos_token_id)
     workflow = RLVRWorkflow(
-        reward_fn=gsm8k_reward_fn, gconfig=config.gconfig, tokenizer=tokenizer
+        reward_fn=gsm8k_reward_fn,
+        gconfig=config.gconfig,
+        tokenizer=tokenizer,
+        enable_thinking=False,
     )
 
     # Run training.
@@ -137,10 +146,15 @@ def main_grpo():
     global_step = 0
     for epoch in range(total_epochs):
         for step, data in enumerate(train_dataloader):
+
             with stats_tracker.record_timing("rollout"):
                 batch = rollout.rollout(data, workflow=workflow)
 
             batch = batch.to(actor.device)
+
+            if config.actor.recompute_logprob:
+                with stats_tracker.record_timing("recompute_logp"):
+                    batch["logprobs"] = actor.compute_logp(batch)
 
             if ref is not None:
                 with stats_tracker.record_timing("ref_logp"):
@@ -156,6 +170,22 @@ def main_grpo():
                 stats = actor.ppo_update(batch)
                 actor.step_lr_scheduler()
 
+            with stats_tracker.record_timing("update_weights"):
+                meta = WeightUpdateMeta(
+                    type="disk",
+                    path=os.path.join(config.cluster.fileroot, "update_weights"),
+                    alloc_mode=None,
+                    comm_backend=None,
+                    model_version=global_step + 1,
+                )
+                if dist.get_rank() == 0:
+                    future = rollout.update_weights(meta)
+                actor.upload_weights(meta)
+                if dist.get_rank() == 0:
+                    future.result()
+                rollout.set_version(global_step)
+                dist.barrier()
+
             with stats_tracker.record_timing("save"):
                 saver.save(actor, epoch, step, global_step)
 
@@ -169,13 +199,13 @@ def main_grpo():
                             eval_rollout.submit(item, workflow)
                             cnt += 1
                     batch = eval_rollout.wait(cnt, timeout=None)
-                    rewards = batch["rewards"]
+                    rewards = batch["rewards"].float()
                     with stats_tracker.scope("grpo-eval"):
                         stats_tracker.denominator(
                             n_seqs=torch.ones(
                                 rewards.shape[0],
                                 device=rewards.device,
-                                dtype=rewards.dtype,
+                                dtype=torch.bool,
                             )
                         )
                         stats_tracker.stat(task_reward=rewards, denominator="n_seqs")
@@ -190,11 +220,16 @@ def main_grpo():
 
             logger.commit(epoch, step, global_step, stats)
             global_step += 1
+            break
+        break
 
     actor.destroy()
     if ref is not None:
         ref.destroy()
+    rollout.destroy()
+    eval_rollout.destroy()
     logger.close()
+    dist.destroy_process_group()
 
 
 if __name__ == "__main__":

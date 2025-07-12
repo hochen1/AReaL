@@ -5,7 +5,6 @@ import time
 import uuid
 
 import pytest
-import requests
 import torch
 from tensordict import TensorDict
 
@@ -34,7 +33,9 @@ def sglang_server():
     seeding.set_random_seed(1, EXPR_NAME)
     cmd = SGLangConfig.build_cmd(
         sglang_config=SGLangConfig(
-            skip_tokenizer_init=False, model_path=MODEL_PATH, mem_fraction_static=0.3
+            skip_tokenizer_init=True,
+            model_path=MODEL_PATH,
+            mem_fraction_static=0.3,
         ),
         host=HOST,
         port=PORT,
@@ -59,11 +60,12 @@ async def test_remote_sglang_generate(sglang_server):
     from arealite.engine.sglang_remote import RemoteSGLangEngine
 
     config = InferenceEngineConfig(experiment_name=EXPR_NAME, trial_name=TRIAL_NAME)
+    tokenizer = load_hf_tokenizer(MODEL_PATH)
     os.environ["AREAL_LLM_SERVER_ADDRS"] = f"{HOST}:{PORT}"
     engine = RemoteSGLangEngine(config)
     req = LLMRequest(
         rid=str(uuid.uuid4()),
-        text="hello! how are you today",
+        input_ids=tokenizer.encode("hello! how are you today"),
         gconfig=GenerationHyperparameters(max_new_tokens=16),
     )
     resp = await engine.agenerate(req)
@@ -74,7 +76,6 @@ async def test_remote_sglang_generate(sglang_server):
         == len(resp.output_tokens)
         == len(resp.output_versions)
     )
-    assert isinstance(resp.completions, str)
 
 
 @pytest.mark.parametrize("n_samples", [1, 2, 4])
@@ -101,6 +102,7 @@ def test_remote_sglang_rollout(sglang_server, n_samples):
         reward_fn=lambda **kwargs: 1.0,  # Dummy reward function
         gconfig=gconfig,
         tokenizer=tokenizer,
+        enable_thinking=False,
     )
 
     data = {
@@ -139,6 +141,7 @@ def test_remote_sglang_staleness_control(sglang_server, bs, ofp, n_samples):
         reward_fn=lambda **kwargs: 1.0,  # Dummy reward function
         gconfig=gconfig,
         tokenizer=tokenizer,
+        enable_thinking=False,
     )
     data = {
         "messages": [{"role": "user", "content": "Hello, how are you?"}],

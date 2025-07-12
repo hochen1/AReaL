@@ -4,6 +4,7 @@ import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from queue import Empty, Full, Queue
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
@@ -34,7 +35,7 @@ if pkg_version.is_available("sglang"):
     else:
         SGLANG_TOKEN_OUTPUT_IDENTIFIER = "token_ids"
 
-ROLLOUT_POLL_WAIT_TIME = 0.4
+ROLLOUT_POLL_WAIT_TIME = 0.1
 RID_CACHE_SIZE = 128
 
 
@@ -53,8 +54,10 @@ class RemoteSGLangEngine(InferenceEngine):
         self.addresses = os.getenv("AREAL_LLM_SERVER_ADDRS").split(",")
         if not self.addresses:
             raise RuntimeError("No configured SGLang servers.")
+        logger.info("Waiting for server ready...")
         for addr in self.addresses:
             self._wait_for_server(addr)
+        logger.info("Servers are all ready!")
 
         self.server_idx = 0
 
@@ -115,7 +118,7 @@ class RemoteSGLangEngine(InferenceEngine):
             traceback.print_exc()
 
     async def _rollout_thread_async(self):
-        data = None
+        pending_data = []
 
         rollout_tasks: Dict[str, asyncio.Task] = {}
         rid = 0
@@ -123,12 +126,14 @@ class RemoteSGLangEngine(InferenceEngine):
         try:
             while not self.exiting.is_set():
                 # Load next data from controller
-                if data is None:
+                while True:
                     try:
                         data, workflow = self.input_queue.get_nowait()
-                        logger.info(f"Get data from puller: {data}")
+                        logger.debug(f"Get data from puller: {data}")
+                        pending_data.append(data)
                     except Empty:
                         logger.debug(f"No data from puller stream.")
+                        break
 
                 # Check capacity
                 if dist.is_initialized():
@@ -136,59 +141,36 @@ class RemoteSGLangEngine(InferenceEngine):
                 else:
                     world_size = 1
 
-                cannot_rollout_reason = []
-                capacity = max(1, self.config.max_concurrent_rollouts // world_size)
-                can_rollout = len(rollout_tasks) < capacity
-                if not can_rollout:
-                    cannot_rollout_reason.append(
-                        f"Exceeding capacity: # running tasks {len(rollout_tasks)} >= capacity {capacity}"
-                    )
-
+                max_concurrent_rollouts = max(
+                    1, self.config.max_concurrent_rollouts // world_size
+                )
+                capacity = max_concurrent_rollouts - len(rollout_tasks)
                 # Staleness control
                 version = self.get_version()
                 ofp = self.config.max_head_offpolicyness
                 with self.lock:
                     sample_cnt = self.rollout_stat.accepted + self.rollout_stat.running
-
-                consumer_bs = self.config.consumer_batch_size
-                if dist.is_initialized():
-                    consumer_bs //= dist.get_world_size()
-                expected_version = sample_cnt // consumer_bs
-                not_staled = expected_version <= ofp + version
-                can_rollout &= not_staled
-                if not not_staled:
-                    cannot_rollout_reason.append(
-                        f"Staled: expected version ({expected_version}) = "
-                        f"global sample cnt ({sample_cnt}) // batch size ({consumer_bs}), "
-                        f"current latest version {version}, "
-                        f"offpolicyness {self.config.max_head_offpolicyness}."
-                    )
-
-                if not can_rollout:
-                    logger.debug(
-                        f"Cannot submit new rollouts. "
-                        + "\n".join(cannot_rollout_reason)
-                    )
+                consumer_bs = max(1, self.config.consumer_batch_size // world_size)
+                capacity = min(capacity, (ofp + version + 1) * consumer_bs - sample_cnt)
 
                 # Create new rollout task
-                if can_rollout and data is not None and not self.paused.is_set():
+                while capacity > 0 and pending_data and not self.paused.is_set():
                     task = asyncio.create_task(
-                        workflow.arun_episode(self, data), name=str(rid)
+                        workflow.arun_episode(self, pending_data.pop(0)), name=str(rid)
                     )
                     rollout_tasks[str(rid)] = task
-
                     with self.lock:
                         self.rollout_stat.submitted += 1
                         self.rollout_stat.running += 1
-                        logger.info(
-                            f"Submit rollout rid {rid}. "
-                            f"Submit: {self.rollout_stat.submitted}, "
-                            f"running: {self.rollout_stat.running}, "
-                            f"accepted: {self.rollout_stat.accepted}."
-                        )
-
+                        if self.config.enable_rollout_tracing:
+                            logger.info(
+                                f"Submit rollout rid {rid}. "
+                                f"Submit: {self.rollout_stat.submitted}, "
+                                f"running: {self.rollout_stat.running}, "
+                                f"accepted: {self.rollout_stat.accepted}."
+                            )
+                    capacity -= 1
                     rid += 1
-                    data = None
 
                 # Wait for rollout completion
                 tasks = list(rollout_tasks.values())
@@ -199,8 +181,10 @@ class RemoteSGLangEngine(InferenceEngine):
                         timeout=ROLLOUT_POLL_WAIT_TIME,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
+                    if not done:
+                        await asyncio.sleep(1)
                 else:
-                    await asyncio.sleep(ROLLOUT_POLL_WAIT_TIME)
+                    await asyncio.sleep(1)
 
                 # Collect done results
                 for task in done:
@@ -219,12 +203,13 @@ class RemoteSGLangEngine(InferenceEngine):
 
                     with self.lock:
                         self.rollout_stat.running -= 1
-                        logger.info(
-                            f"Finish rollout {task_rid}. "
-                            f"Submit: {self.rollout_stat.submitted}, "
-                            f"running: {self.rollout_stat.running}, "
-                            f"accepted: {self.rollout_stat.accepted}."
-                        )
+                        if self.config.enable_rollout_tracing:
+                            logger.info(
+                                f"Finish rollout {task_rid}. "
+                                f"Submit: {self.rollout_stat.submitted}, "
+                                f"running: {self.rollout_stat.running}, "
+                                f"accepted: {self.rollout_stat.accepted}."
+                            )
         except Exception:
             traceback.print_exc()
         finally:
@@ -323,15 +308,11 @@ class RemoteSGLangEngine(InferenceEngine):
 
         # NOTE: rid should NOT be passed in payload
         payload = {
-            "text": req.text,
+            "input_ids": req.input_ids.copy(),
             "sampling_params": sample_params,
             "return_logprob": True,
             "stream": False,
         }
-        if req.text:
-            payload["text"] = req.text
-        else:
-            payload["input_ids"] = req.input_ids
 
         # Make request
         start_time = time.perf_counter()
@@ -369,7 +350,6 @@ class RemoteSGLangEngine(InferenceEngine):
             )
 
             # Parse response
-            completions += result["text"]
             meta_info = result["meta_info"]
             output_tokens = [x[1] for x in meta_info["output_token_logprobs"]]
             output_logprobs = [x[0] for x in meta_info["output_token_logprobs"]]
@@ -384,12 +364,11 @@ class RemoteSGLangEngine(InferenceEngine):
             finish_reason = meta_info["finish_reason"]
             stop_reason = finish_reason["type"]
 
-            payload["text"] += result["text"]
+            payload["input_ids"] += result[SGLANG_TOKEN_OUTPUT_IDENTIFIER]
 
         latency = time.perf_counter() - start_time
 
         return LLMResponse(
-            completions=completions,
             input_tokens=req.input_ids,
             output_tokens=accumulated_output_tokens,
             output_logprobs=accumulated_output_logprobs,
@@ -410,10 +389,10 @@ class RemoteSGLangEngine(InferenceEngine):
             update_name = names.update_weights_from_disk(
                 self.config.experiment_name, self.config.trial_name, meta.model_version
             )
-            save_timestamp = int(name_resolve.wait(update_name, timeout=120))
-            load_timestamp = time.time_ns()
+            save_timestamp = float(name_resolve.wait(update_name, timeout=120))
+            load_timestamp = datetime.now().timestamp()
             logger.info(
-                f"Begin update weights from {meta.path}, responded in {(load_timestamp - save_timestamp)/1e6:.2f} ms"
+                f"Begin update weights from {meta.path}, responded in {(load_timestamp - save_timestamp):.2f}s"
             )
             try:
                 jobs = [
@@ -427,7 +406,7 @@ class RemoteSGLangEngine(InferenceEngine):
             finally:
                 loop.close()
             logger.info(
-                f"Loading weights done in {(time.time_ns() - load_timestamp)/1e6:.2f} ms"
+                f"Loading weights done in {(datetime.now().timestamp() - load_timestamp):.2f}s"
             )
             self.set_version(meta.model_version)
         else:
@@ -478,7 +457,7 @@ class RemoteSGLangEngine(InferenceEngine):
                     with self.lock:
                         self.rollout_stat.accepted -= 1
             except Empty:
-                time.sleep(ROLLOUT_POLL_WAIT_TIME)
+                pass
         if self.exiting.is_set():
             raise RuntimeError("Rollout engine is exiting, cannot wait for results.")
         if accepted < count:
