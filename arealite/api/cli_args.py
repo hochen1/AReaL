@@ -340,12 +340,12 @@ class SGLangConfig:
         host,
         port,
         dist_init_addr: Optional[str] = None,
+        sglang_version: Optional[str] = None,
     ):
         from realhf.base import pkg_version
         from realhf.experiments.common.utils import asdict as conf_as_dict
 
         args: Dict = conf_as_dict(sglang_config)
-
         args = dict(
             host=host,
             port=port,
@@ -362,13 +362,28 @@ class SGLangConfig:
             base_gpu_id=base_gpu_id,
             nnodes=1,
             node_rank=0,
+            # initialization addresses and ports
             dist_init_addr=dist_init_addr,
             **args,
         )
+        if sglang_version:
+            version_less_than_0_4_4 = (
+                pkg_version.compare_versions(sglang_version, "0.4.4") < 0
+            )
+            version_less_than_0_4_3 = (
+                pkg_version.compare_versions(sglang_version, "0.4.3") < 0
+            )
+        elif pkg_version.is_available("sglang"):
+            version_less_than_0_4_4 = pkg_version.is_version_less("sglang", "0.4.4")
+            version_less_than_0_4_3 = pkg_version.is_version_less("sglang", "0.4.3")
+        else:
+            raise ValueError(
+                "A installed SGLang package or a specific SGLang version should be provided to build SGLang server cmd."
+            )
 
-        if pkg_version.is_version_less("sglang", "0.4.4"):
+        if version_less_than_0_4_4:
             args.pop("log_requests_level")
-        if pkg_version.is_version_less("sglang", "0.4.3"):
+        if version_less_than_0_4_3:
             args.pop("enable_nccl_nvls")
             args.pop("triton_attention_num_kv_splits")
             args.pop("cuda_graph_bs")
@@ -609,6 +624,46 @@ class DatasetConfig:
 
 
 @dataclass
+class LauncherConfig:
+    """Configuration for launching the SGLang server."""
+
+    inference_server_cpus_per_gpu: int = field(
+        default=4,
+        metadata={"help": "Number of CPUs allocated per GPU for inference server. "},
+    )
+    inference_server_mem_per_gpu: int = field(
+        default=32 * 1024,
+        metadata={"help": "Memory allocated per GPU for inference server in MB. "},
+    )
+    trainer_cpus_per_gpu: int = field(
+        default=4,
+        metadata={"help": "Number of CPUs allocated per GPU for training. "},
+    )
+    trainer_mem_per_gpu: int = field(
+        default=32 * 1024,
+        metadata={"help": "Memory allocated per GPU for training in MB. "},
+    )
+    inference_server_env_vars: str = field(
+        default="",
+        metadata={
+            "help": "Environment variables for inference server, seperated by commas. "
+            "Example: 'ENV1=val1,ENV2=val2'. "
+        },
+    )
+    trainer_env_vars: str = field(
+        default="",
+        metadata={
+            "help": "Environment variables for training, seperated by commas. "
+            "Example: 'ENV1=val1,ENV2=val2'. "
+        },
+    )
+    trainer_port: int = field(
+        default=27015,
+        metadata={"help": "Trainer port used for torch.distributed initialization."},
+    )
+
+
+@dataclass
 class BaseExperimentConfig:
     # NOTE: we need this unified config class because different experiments
     # have different config structures, e.g., GRPO has two engine configs,
@@ -668,6 +723,7 @@ class BaseExperimentConfig:
 
     server_only: bool = False
     sglang: SGLangConfig = field(default_factory=SGLangConfig)
+    launcher: LauncherConfig = field(default_factory=LauncherConfig)
 
 
 @dataclass
@@ -714,7 +770,7 @@ def to_structured_cfg(cfg, config_cls):
     return cfg
 
 
-def load_expr_config(argv: List[str], config_cls) -> Tuple[BaseExperimentConfig, str]:
+def load_expr_config(argv: List[str], config_cls):
     cfg, config_file = parse_cli_args(argv)
     cfg = to_structured_cfg(cfg, config_cls=config_cls)
     cfg = OmegaConf.to_object(cfg)
