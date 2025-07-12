@@ -566,6 +566,58 @@ class DatasetConfig:
 
 
 @dataclass
+class LauncherConfig:
+    """Configuration for launching the SGLang server."""
+
+    inference_server_cpus_per_gpu: int = field(
+        default=15,
+        metadata={
+            "help": "Number of CPUs allocated per GPU for inference server. "
+        },
+    )
+    inference_server_mem_per_gpu: int = field(
+        default=150*1024,
+        metadata={
+            "help": "Memory allocated per GPU for inference server in MB. "
+        },
+    )
+    trainer_cpus_per_gpu: int = field(
+        default=15,
+        metadata={
+            "help": "Number of CPUs allocated per GPU for training. "
+        },
+    )
+    trainer_mem_per_gpu: int = field(
+        default=150*1024,
+        metadata={
+            "help": "Memory allocated per GPU for training in MB. "
+        },
+    )
+    inference_server_env_vars: str = field(
+        defualt="",
+        metadata={
+            "help": "Environment variables for inference server, seperated by commas. "
+            "Example: 'ENV1=val1,ENV2=val2'. "
+        },
+    )
+    trainer_env_vars: str = field(
+        default="",
+        metadata={
+            "help": "Environment variables for training, seperated by commas. "
+            "Example: 'ENV1=val1,ENV2=val2'. "
+        },
+    )
+    trainer_port: int = field(
+        default=27015,
+        metadata={
+            "help": "Trainer port used for torch.distributed initialization."
+        },
+    )
+
+
+
+
+@dataclass
 class BaseExperimentConfig:
     # NOTE: we need this unified config class because different experiments
     # have different config structures, e.g., GRPO has two engine configs,
@@ -625,6 +677,7 @@ class BaseExperimentConfig:
 
     server_only: bool = False
     sglang: SGLangConfig = field(default_factory=SGLangConfig)
+    launcher: LauncherConfig = field(default_factory=LauncherConfig)
 
 
 @dataclass
