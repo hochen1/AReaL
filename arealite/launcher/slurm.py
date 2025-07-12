@@ -14,15 +14,14 @@ import realhf.base.logging as logging
 from arealite.api.cli_args import (
     BaseExperimentConfig,
     ClusterSpecConfig,
-    SGLangConfig,
     LauncherConfig,
+    SGLangConfig,
     parse_cli_args,
     to_structured_cfg,
 )
 from arealite.api.io_struct import AllocationMode, AllocationType
-from realhf.scheduler.client import JobException, JobInfo, JobState
 from realhf.base import logging, name_resolve, names
-
+from realhf.scheduler.client import JobException, JobInfo, JobState
 
 logger = logging.getLogger("SlurmLauncher")
 
@@ -107,7 +106,6 @@ def query_jobs(
                 slurm_id=int(job_id.strip()),
             )
         )
-    print(rs)
     return rs
 
 
@@ -183,7 +181,7 @@ BASE_ENVIRONS = {
     "TRITON_CACHE_DIR": TRITON_CACHE_PATH,
     "CUDA_DEVICE_MAX_CONNECTIONS": "1",
     "OMP_NUM_THREADS": str(min(os.cpu_count(), 32)),
-    "HF_ENDPOINT": "https://hf-mirror.com",
+    "HF_ENDPOINT": "https://hf-mirror.com",  # FIXME: move to user option
     "PYTHONPATH": pathlib.Path(__file__).resolve().parent.parent.parent,
 }
 NA132_ENVIRONS = {
@@ -311,12 +309,14 @@ class SlurmLauncher:
         )
 
         mem_per_cpu = mem_per_task // cpus_per_task  # MB per CPU
-        mem_per_node = mem_per_task * count // nodes + 1024 * 100  # FIXME
+        mem_per_node = (
+            mem_per_task * count // nodes + 1024 * 10
+        )  # make sure slurm does not run out of resources
 
         sbatch_options = [
             f"--job-name={self.slurm_name(job_name)}",
             f"--output={self.log_path_of(job_name)}",
-            # "--open-mode=append", # FIXME
+            "--open-mode=append",
             "--no-requeue",
             f"--nodes={nodes}-{nodes}",
             f"--ntasks-per-node={ntasks_per_node}",
@@ -556,7 +556,7 @@ if __name__ == "__main__":
     config.launcher = to_structured_cfg(config.launcher, LauncherConfig)
     config.cluster = to_structured_cfg(config.cluster, ClusterSpecConfig)
     name_resolve.reconfigure(config.cluster.name_resolve)
-    
+
     n_nodes = config.n_nodes
     n_gpus_per_node = config.n_gpus_per_node
     if n_gpus_per_node < config.cluster.n_gpus_per_node:
@@ -594,9 +594,7 @@ if __name__ == "__main__":
         n_sglang_servers_per_node = config.cluster.n_gpus_per_node // sglang_tp_size
 
         base_seed = config.sglang.random_seed
-        sglang_server_cmd_template = (
-            f"python3 -m arealite.launcher.sglang_server {sys.argv[1:]} sglang.random_seed={{seed}}"
-        )
+        sglang_server_cmd_template = f"python3 -m arealite.launcher.sglang_server {' '.join(sys.argv[1:])} sglang.random_seed={{seed}}"
         for i in range(n_sglang_servers):
             sglang_cmd = sglang_server_cmd_template.format(
                 seed=base_seed + i,
@@ -610,25 +608,27 @@ if __name__ == "__main__":
                 count=n_sglang_servers,
                 nodes=n_sglang_nodes,
                 n_gpus_per_node=config.cluster.n_gpus_per_node,
-                cpus_per_task=launcher.inference_server_cpus_per_gpu * sglang_tp_size,
-                mem_per_task=launcher.inference_server_mem_per_gpu * sglang_tp_size, 
+                cpus_per_task=config.launcher.inference_server_cpus_per_gpu
+                * sglang_tp_size,
+                mem_per_task=config.launcher.inference_server_mem_per_gpu
+                * sglang_tp_size,
                 container_image=config.cluster.gpu_infer_image,
                 container_mounts=config.cluster.mount,
                 env_vars=get_env_vars(
                     config.cluster.cluster_name,
-                    config.laucnher.inference_server_env_vars,
+                    config.launcher.inference_server_env_vars,
                 ),
             )
 
         # Get SGLang slurm nodes, find the hosts
-        name = names.gen_servers(
-            config.experiment_name, config.trial_name
-        )
+        name = names.gen_servers(config.experiment_name, config.trial_name)
         start = time.perf_counter()
         while True:
             sglang_addrs = name_resolve.get_subtree(name)
             if len(sglang_addrs) >= n_sglang_servers:
-                logger.info(f"Found {n_sglang_servers} SGLang servers: {", ".join(sglang_addrs)}")
+                logger.info(
+                    f"Found {n_sglang_servers} SGLang servers: {', '.join(sglang_addrs)}"
+                )
                 break
 
             time.sleep(1)
@@ -641,7 +641,7 @@ if __name__ == "__main__":
     trainer_n_nodes = n_nodes - n_sglang_nodes
     trainer_cmd_template = (
         f"torchrun --nnodes={{nnodes}} --nproc-per-node={{nproc_per_node}} --node-rank {{node_rank}} "
-        f"--master-addr $head_node_ip --master-port {config.launcher.trainer_port} {sys.argv[1:]}"
+        f"--master-addr $head_node_ip --master-port {config.launcher.trainer_port} {' '.join(sys.argv[1:])}"
     )
 
     trainer_cmds = []
@@ -664,8 +664,10 @@ if __name__ == "__main__":
             count=trainer_n_nodes,
             nodes=trainer_n_nodes,
             n_gpus_per_node=config.cluster.n_gpus_per_node,
-            cpus_per_task=launcher.trainer_cpus_per_gpu * config.cluster.n_gpus_per_node,
-            mem_per_task=launcher.trainer_mem_per_gpu * config.cluster.n_gpus_per_node,
+            cpus_per_task=config.launcher.trainer_cpus_per_gpu
+            * config.cluster.n_gpus_per_node,
+            mem_per_task=config.launcher.trainer_mem_per_gpu
+            * config.cluster.n_gpus_per_node,
             container_image=config.cluster.gpu_image,
             container_mounts=config.cluster.mount,
             env_vars=dict(

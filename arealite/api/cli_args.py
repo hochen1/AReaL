@@ -570,31 +570,23 @@ class LauncherConfig:
     """Configuration for launching the SGLang server."""
 
     inference_server_cpus_per_gpu: int = field(
-        default=15,
-        metadata={
-            "help": "Number of CPUs allocated per GPU for inference server. "
-        },
+        default=4,
+        metadata={"help": "Number of CPUs allocated per GPU for inference server. "},
     )
     inference_server_mem_per_gpu: int = field(
-        default=150*1024,
-        metadata={
-            "help": "Memory allocated per GPU for inference server in MB. "
-        },
+        default=32 * 1024,
+        metadata={"help": "Memory allocated per GPU for inference server in MB. "},
     )
     trainer_cpus_per_gpu: int = field(
-        default=15,
-        metadata={
-            "help": "Number of CPUs allocated per GPU for training. "
-        },
+        default=4,
+        metadata={"help": "Number of CPUs allocated per GPU for training. "},
     )
     trainer_mem_per_gpu: int = field(
-        default=150*1024,
-        metadata={
-            "help": "Memory allocated per GPU for training in MB. "
-        },
+        default=32 * 1024,
+        metadata={"help": "Memory allocated per GPU for training in MB. "},
     )
     inference_server_env_vars: str = field(
-        defualt="",
+        default="",
         metadata={
             "help": "Environment variables for inference server, seperated by commas. "
             "Example: 'ENV1=val1,ENV2=val2'. "
@@ -609,12 +601,8 @@ class LauncherConfig:
     )
     trainer_port: int = field(
         default=27015,
-        metadata={
-            "help": "Trainer port used for torch.distributed initialization."
-        },
+        metadata={"help": "Trainer port used for torch.distributed initialization."},
     )
-
-
 
 
 @dataclass

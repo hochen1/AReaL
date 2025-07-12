@@ -105,20 +105,16 @@ class SGLangServerWrapper:
         self,
         experiment_name: str,
         trial_name: str,
-        name_resolve_config: NameResolveConfig,
         sglang_config: SGLangConfig,
         tp_size: int,
     ):
         self.experiment_name = experiment_name
         self.trial_name = trial_name
-        self.name_resolve_config = name_resolve_config
         self.config = sglang_config
         self.tp_size = tp_size
         self.server_process = None
 
     def run(self):
-        name_resolve.reconfigure(self.name_resolve_config)
-
         server_port, dist_init_port = find_free_ports(2, (10000, 50000))
         dist_init_addr = f"localhost:{dist_init_port}"
         host_ip = gethostip()
@@ -145,11 +141,17 @@ if __name__ == "__main__":
     config.cluster.name_resolve = to_structured_cfg(
         config.cluster.name_resolve, NameResolveConfig
     )
+    name_resolve.reconfigure(config.cluster.name_resolve)
 
     allocation_mode = config.allocation_mode
     allocation_mode = AllocationMode.from_str(allocation_mode)
     assert allocation_mode.type_ == AllocationType.DECOUPLED_SGLANG
     tp_size = allocation_mode.gen_tp_size
 
-    sglang_server = SGLangServerWrapper(config.sglang, tp_size)
+    sglang_server = SGLangServerWrapper(
+        config.experiment_name,
+        config.trial_name,
+        config.sglang,
+        tp_size,
+    )
     sglang_server.run()
