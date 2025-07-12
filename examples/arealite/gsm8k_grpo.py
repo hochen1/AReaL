@@ -183,7 +183,7 @@ def main_grpo():
                 actor.upload_weights(meta)
                 if dist.get_rank() == 0:
                     future.result()
-                rollout.set_version(global_step)
+                rollout.set_version(global_step + 1)
                 dist.barrier()
 
             with stats_tracker.record_timing("save"):
