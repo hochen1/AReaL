@@ -54,6 +54,8 @@ class RemoteSGLangEngine(InferenceEngine):
         if not self.addresses:
             raise RuntimeError("No configured SGLang servers.")
         for addr in self.addresses:
+            # FIXME
+            print(f"waiting for server address {addr}")
             self._wait_for_server(addr)
 
         self.server_idx = 0
@@ -88,7 +90,8 @@ class RemoteSGLangEngine(InferenceEngine):
                 timeout=30,
             )
             return response.status_code == 200
-        except requests.exceptions.RequestException:
+        except requests.exceptions.RequestException as e:
+            print(f"Check {base_url}/metrics failed, reason: {e}")
             return False
 
     def initialize(self, addr: str | None, ft_spec: FinetuneSpec = None):

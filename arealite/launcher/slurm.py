@@ -160,7 +160,8 @@ echo head_node_ip=$head_node_ip
 wait
 """
 
-SRUN_CMD_TEMPLATE = """srun --overlap --mpi=pmi2 -K -l --chdir $PWD --nodes={nodes} --ntasks={ntasks} --gres=gpu:{n_gpus_per_node} --cpus-per-task={cpus_per_task} \\
+SRUN_CMD_TEMPLATE = """srun --overlap --mpi=pmi2 -K -l --chdir $PWD --nodelist=${{nodes_array[{node_id}]}} \\
+    --nodes={nodes} --ntasks={ntasks} --gres=gpu:{n_gpus_per_node} --cpus-per-task={cpus_per_task} \\
     --mem-per-cpu={mem_per_cpu}M {apptainer_name} exec {apptainer_options} --bind {container_mounts} \\
     {container_env_strings} \\
     {container_image} \\
@@ -336,6 +337,7 @@ class SlurmLauncher:
             # resolve CUDA_VISIBLE_DEVICES for each task
             gpu_id_start = (i % ntasks_per_node) * n_gpus_per_task
             gpu_id_end = ((i % ntasks_per_node) + 1) * n_gpus_per_task
+            node_id = i // ntasks_per_node
             _env_vars = {
                 **env_vars,
                 "CUDA_VISIBLE_DEVICES": ",".join(
@@ -353,6 +355,7 @@ class SlurmLauncher:
             srun_cmd = SRUN_CMD_TEMPLATE.format(
                 nodes=1,
                 ntasks=1,
+                node_id=node_id,
                 n_gpus_per_node=n_gpus_per_node,
                 cpus_per_task=cpus_per_task,
                 mem_per_cpu=mem_per_cpu,
@@ -374,7 +377,6 @@ class SlurmLauncher:
             f.write(sbatch_script)
 
         # Submit the job
-        # FIXME: debug only
         try:
             output = (
                 subprocess.check_output(["sbatch", sbatch_file_path])
@@ -540,39 +542,10 @@ class SlurmLauncher:
             )
 
 
-def slurm_args_parser():
-    parser = argparse.ArgumentParser(description="Slurm Launcher for AReaL")
-    parser.add_argument(
-        "--sglang-server-base-port",
-        type=int,
-        required=False,
-        default=27010,
-        help="Base port for SGLang servers. SGLang servers on the same node will .",
-    )
-    parser.add_argument(
-        "--trainer-port",
-        type=int,
-        required=False,
-        default=27009,
-        help="Pytorch distributed initialization port for trainer.",
-    )
-    parser.add_argument(
-        "--sglang-version",
-        type=str,
-        required=False,
-        default="0.4.6.post4",
-        help="SGLang version in your GPU inference image.",
-    )
-    return parser
-
-
 if __name__ == "__main__":
     # usage: python -m arealite.launcher.slurm <entry_point> <config_path> [<args>]
-    r = parse_cli_args(sys.argv[2:], parser=slurm_args_parser())
+    config, config_file = parse_cli_args(sys.argv[2:])
     entry_point = sys.argv[1]
-    config = r.config
-    config_file = r.config_file
-    args = r.additional_args
 
     config.cluster = to_structured_cfg(config.cluster, ClusterSpecConfig)
     n_nodes = config.n_nodes
@@ -671,6 +644,7 @@ if __name__ == "__main__":
                     sglang_addrs.extend(
                         [f"{host}:{port}" for port in sglang_ports_on_node]
                     )
+                logger.info(f"Get SGLang addresses: {' '.join(sglang_addrs)}")
                 assert len(sglang_addrs) == n_sglang_servers
                 break
             time.sleep(10)

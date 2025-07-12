@@ -243,8 +243,7 @@ class LocalLauncher:
 
 
 def main_local():
-    r = parse_cli_args(sys.argv[2:])
-    cfg = r.config
+    cfg, _ = parse_cli_args(sys.argv[2:])
     alloc_mode = AllocationMode.from_str(cfg.allocation_mode)
 
     launcher = LocalLauncher(cfg.experiment_name, cfg.trial_name, cfg.cluster.fileroot)
