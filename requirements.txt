@@ -74,3 +74,5 @@ torchdata
 autoflake
 gymnasium
 tensordict
+liger_kernel==0.6.0
+triton<=3.1.0

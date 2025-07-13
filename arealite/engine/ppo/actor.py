@@ -1,4 +1,5 @@
 import functools
+import gc
 from typing import Dict, List, Optional
 
 import torch
@@ -215,6 +216,9 @@ class PPOActor:
             mb_spec=MicroBatchSpec(n_mbs=self.config.ppo_n_minibatches),
         )
         for mb in mb_inputs.mbs:
+            gc.collect()
+            torch.cuda.empty_cache()
+            gc.collect()
             train_stat = self.engine.train_batch(
                 mb,
                 loss_fn=functools.partial(

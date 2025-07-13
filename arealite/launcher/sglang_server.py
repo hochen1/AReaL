@@ -107,15 +107,28 @@ class SGLangServerWrapper:
         trial_name: str,
         sglang_config: SGLangConfig,
         tp_size: int,
+        n_gpus_per_node: int,
     ):
         self.experiment_name = experiment_name
         self.trial_name = trial_name
         self.config = sglang_config
         self.tp_size = tp_size
         self.server_process = None
+        self.n_gpus_per_node = n_gpus_per_node
 
     def run(self):
-        server_port, dist_init_port = find_free_ports(2, (10000, 50000))
+        gpus_per_server = len(os.getenv("CUDA_VISIBLE_DEVICES").split(","))
+        server_local_idx = (
+            int(os.getenv("CUDA_VISIBLE_DEVICES").split(",")[0]) // gpus_per_server
+        )
+        n_servers_per_node = max(1, self.n_gpus_per_node // gpus_per_server)
+        ports_per_server = 40000 // n_servers_per_node
+        port_range = (
+            server_local_idx * ports_per_server + 10000,
+            (server_local_idx + 1) * ports_per_server + 10000,
+        )
+        server_port, dist_init_port = find_free_ports(2, port_range)
+
         dist_init_addr = f"localhost:{dist_init_port}"
         host_ip = gethostip()
 
@@ -153,5 +166,6 @@ if __name__ == "__main__":
         config.trial_name,
         config.sglang,
         tp_size,
+        n_gpus_per_node=config.n_gpus_per_node,
     )
     sglang_server.run()

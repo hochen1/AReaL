@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import os
 import re
 import sys
@@ -83,12 +84,13 @@ class RLVRWorkflow(RolloutWorkflow):
         return concat_padded_tensors(results)
 
 
-def get_boba_math_dataset(rank, world_size):
+def get_boba_math_dataset(tokenizer, rank, world_size):
     dataset = load_dataset(
         path="json",
         split="train",
         data_files="/storage/openpsi/users/xushusheng.xss/training_data/boba_106k_0319.jsonl",
     )
+    dataset = dataset.filter(lambda x: len(tokenizer.encode(x["prompt"])) <= 1024)
     return split_dataset_by_node(dataset, rank=rank, world_size=world_size)
 
 
@@ -113,7 +115,7 @@ def main_grpo():
 
     # Create dataset and dataloaders
     train_dataloader = StatefulDataLoader(
-        get_boba_math_dataset(rank, world_size),
+        get_boba_math_dataset(tokenizer, rank, world_size),
         batch_size=config.train_dataset.batch_size // world_size,
         shuffle=config.train_dataset.shuffle,
         num_workers=config.train_dataset.num_workers,
@@ -150,7 +152,6 @@ def main_grpo():
     # Run training.
     saver = Saver(config.saver, ft_spec, for_recover=False)
     logger = StatsLogger(config.stats_logger, ft_spec)
-    evaluator = Evaluator(config.evaluator, ft_spec)
 
     total_epochs = config.total_train_epochs
     steps_per_epoch = len(train_dataloader)
@@ -193,6 +194,11 @@ def main_grpo():
 
         with stats_tracker.record_timing("compute_advantage"):
             actor.compute_advantages(batch)
+
+        with stats_tracker.record_timing("clear_cache"):
+            gc.collect()
+            torch.cuda.empty_cache()
+            gc.collect()
 
         with (
             stats_tracker.record_timing("train_step"),

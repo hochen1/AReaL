@@ -1,5 +1,6 @@
 import asyncio
 import os
+import random
 import threading
 import time
 import traceback
@@ -57,12 +58,10 @@ class RemoteSGLangEngine(InferenceEngine):
             raise RuntimeError("No configured SGLang servers.")
         logger.info("Waiting for server ready...")
         for addr in self.addresses:
-            # FIXME
-            print(f"waiting for server address {addr}")
             self._wait_for_server(addr)
         logger.info("Servers are all ready!")
 
-        self.server_idx = 0
+        self.server_idx = random.randint(0, len(self.addresses) - 1)
 
         qsize = config.queue_size or config.max_concurrent_rollouts * 16
         self.input_queue = Queue(maxsize=qsize)

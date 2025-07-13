@@ -112,17 +112,23 @@ class FSDPEngine(TrainEngine):
                     attn_implementation=self.config.attn_impl,
                 )
             else:
-                model = AutoModelForCausalLM.from_pretrained(
+                from liger_kernel.transformers import AutoLigerKernelForCausalLM
+
+                model = AutoLigerKernelForCausalLM.from_pretrained(
                     pretrained_model_name_or_path=self.config.path,
                     trust_remote_code=True,
                     torch_dtype=dtype,
                     attn_implementation=self.config.attn_impl,
                 )
+        if self.config.gradient_checkpointing:
+            model.gradient_checkpointing_enable(
+                gradient_checkpointing_kwargs={"use_reentrant": False}
+            )
         logger.info(f"Model creation and loading time: {time.perf_counter() - tik}")
 
         # Simple auto wrap policy
         self.mixed_precision_policy = MixedPrecisionPolicy(
-            param_dtype=torch.bfloat16,
+            param_dtype=dtype,
             reduce_dtype=torch.float32,
             cast_forward_inputs=True,
         )

@@ -133,7 +133,7 @@ def get_slurm_host_ip(node: str):
         logger.warning(f"Get slurm host ip for node {node} failed.")
 
 
-SGLANG_SERVER_TIMEOUT_SECONDS = 120
+SGLANG_SERVER_TIMEOUT_SECONDS = 180
 SCHEDULER_WAIT_CHECK_TIME_INTERVAL = 5
 
 
@@ -633,6 +633,7 @@ if __name__ == "__main__":
 
             time.sleep(1)
             if time.perf_counter() - start > SGLANG_SERVER_TIMEOUT_SECONDS:
+                launcher.stop_all()
                 raise TimeoutError(
                     f"Timeout waiting for SGLang servers to be ready. "
                     f"Expected {n_sglang_servers} servers, found {len(sglang_addrs)}."
