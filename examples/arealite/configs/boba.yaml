@@ -63,8 +63,8 @@ actor:
   reward_bias: -0.5
   kl_ctl: 0.0
   ppo_n_minibatches: 1
-  recompute_logprob: false
-  use_decoupled_loss: false
+  recompute_logprob: true
+  use_decoupled_loss: true
   behav_imp_weight_cap: 5.0
 
 ref:

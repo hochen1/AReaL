@@ -32,8 +32,6 @@ dependencies = [
     "datasets",
     "accelerate",
     "transformers==4.51.1",
-    "liger_kernel==0.6.0",
-    "triton<=3.1.0",
     
     # Scientific computing
     "numpy<2.0.0",
