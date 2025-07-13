@@ -1,4 +1,8 @@
+from typing import Dict, Optional, Tuple
+
+import numpy as np
 import torch
+import torch.distributed as dist
 
 
 @torch.compile
@@ -11,7 +15,7 @@ def gather_logprobs(
 
 
 @torch.compile
-def gather_logprobs_entropy(
+def _gather_logprobs_entropy(
     logits: torch.Tensor, labels: torch.Tensor, temperature: float = 1.0
 ):
     log_probs = torch.nn.functional.log_softmax(logits.float() / temperature, dim=-1)
@@ -20,11 +24,33 @@ def gather_logprobs_entropy(
     return log_probs_labels, entropy
 
 
-from typing import Dict, Optional, Tuple
+def gather_logprobs_entropy(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    temperature: float = 1.0,
+    chunk_size: int = 1024,
+):
+    batch_size = logits.shape[0]
 
-import numpy as np
-import torch
-import torch.distributed as dist
+    if batch_size <= chunk_size:
+        return _gather_logprobs_entropy(logits, labels, temperature)
+
+    log_probs_labels_list = []
+    entropy_list = []
+
+    for i in range(0, batch_size, chunk_size):
+        end_idx = min(i + chunk_size, batch_size)
+        chunk_logits = logits[i:end_idx]
+        chunk_labels = labels[i:end_idx]
+
+        chunk_log_probs, chunk_entropy = _gather_logprobs_entropy(
+            chunk_logits, chunk_labels, temperature
+        )
+
+        log_probs_labels_list.append(chunk_log_probs)
+        entropy_list.append(chunk_entropy)
+
+    return torch.cat(log_probs_labels_list), torch.cat(entropy_list)
 
 
 @torch.no_grad()

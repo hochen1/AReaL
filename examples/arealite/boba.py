@@ -28,6 +28,7 @@ from arealite.api.workflow_api import RolloutWorkflow
 from arealite.engine.ppo.actor import FSDPPPOActor
 from arealite.engine.sglang_remote import RemoteSGLangEngine
 from arealite.utils.data import concat_padded_tensors
+from arealite.utils.device import log_gpu_stats
 from arealite.utils.evaluator import Evaluator
 from arealite.utils.saver import Saver
 from arealite.utils.stats_logger import StatsLogger
@@ -187,18 +188,15 @@ def main_grpo():
                     batch["logprobs"] = logp
                 else:
                     batch["prox_logp"] = logp
+            log_gpu_stats("Recompute logp")
 
         if ref is not None:
             with stats_tracker.record_timing("ref_logp"):
                 batch["ref_logp"] = ref.compute_logp(batch)
+            log_gpu_stats("Ref logp")
 
         with stats_tracker.record_timing("compute_advantage"):
             actor.compute_advantages(batch)
-
-        with stats_tracker.record_timing("clear_cache"):
-            gc.collect()
-            torch.cuda.empty_cache()
-            gc.collect()
 
         with (
             stats_tracker.record_timing("train_step"),
@@ -206,6 +204,7 @@ def main_grpo():
         ):
             stats = actor.ppo_update(batch)
             actor.step_lr_scheduler()
+        log_gpu_stats("PPO update")
 
         with stats_tracker.record_timing("update_weights"):
             meta = WeightUpdateMeta(

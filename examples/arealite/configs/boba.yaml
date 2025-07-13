@@ -10,7 +10,6 @@ cluster:
   name_resolve:
     type: etcd3
     etcd3_addr: etcd-client.openpsi-etcd.svc.sigma-na130-lingbo.na130.wl-robby.local:2379
-  exclude: slurmd-69
   gpu_image: /storage/openpsi/images/areal-v0.3.0.post1.sif
   gpu_infer_image: /storage/openpsi/images/areal-v0.3.0.post1.sif
 seed: 1
@@ -30,7 +29,7 @@ rollout:
 gconfig:
   n_samples: 16
   min_new_tokens: 0
-  max_new_tokens: 15360
+  max_new_tokens: 30720
   greedy: false
   temperature: 1.0
 
@@ -39,10 +38,11 @@ actor:
   trial_name: ${trial_name}
   path: /storage/openpsi/models/deepseek-ai__DeepSeek-R1-Distill-Qwen-1.5B/
   init_from_scratch: false
+  disable_dropout: true
   gradient_checkpointing: true
   dtype: bfloat16
   mb_spec:
-    max_tokens_per_mb: 16384
+    max_tokens_per_mb: 32768
   optimizer:
     type: adam
     lr: 1e-6
@@ -63,8 +63,8 @@ actor:
   reward_bias: -0.5
   kl_ctl: 0.0
   ppo_n_minibatches: 1
-  recompute_logprob: true
-  use_decoupled_loss: true
+  recompute_logprob: false
+  use_decoupled_loss: false
   behav_imp_weight_cap: 5.0
 
 ref:
@@ -72,9 +72,10 @@ ref:
   trial_name: ${trial_name}
   path: ${actor.path}
   init_from_scratch: false
+  disable_dropout: true
   dtype: ${actor.dtype}
   mb_spec:
-    max_tokens_per_mb: 16384
+    max_tokens_per_mb: 32768
   optimizer: null
   backend: fsdp
 
@@ -91,7 +92,7 @@ sglang:
 
 # datasets
 train_dataset:
-  batch_size: 128
+  batch_size: 16
   shuffle: true
   pin_memory: true
 

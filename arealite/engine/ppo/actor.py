@@ -211,14 +211,13 @@ class PPOActor:
 
         for key in ["rewards", "tot_rewards", "kl_rewards", "versions"]:
             data.pop(key, None)
+        # NOTE: calling engine.train() is critical to enabling gradient checkpointing
+        self.engine.train()
         mb_inputs = split_padded_tensor_dict_into_mb_list(
             data,
             mb_spec=MicroBatchSpec(n_mbs=self.config.ppo_n_minibatches),
         )
         for mb in mb_inputs.mbs:
-            gc.collect()
-            torch.cuda.empty_cache()
-            gc.collect()
             train_stat = self.engine.train_batch(
                 mb,
                 loss_fn=functools.partial(

@@ -312,7 +312,7 @@ def split_padded_tensor_dict_into_mb_list(
         )
     bs = data["attention_mask"].shape[0]
     max_seqlen = data["attention_mask"].shape[1]
-    input_lens = data["attention_mask"].sum(1).cpu().numpy()
+    input_lens = data["attention_mask"].sum(1).long().cpu().numpy()
 
     # check tensor shape, split only 1d tensors with length "total_lens"
     to_split = {}

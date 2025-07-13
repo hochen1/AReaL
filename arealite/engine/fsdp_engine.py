@@ -46,6 +46,7 @@ from arealite.utils.fsdp import (
     fsdp2_load_full_state_dict,
     get_cosine_schedule_with_warmup,
 )
+from arealite.utils.model import disable_dropout_in_model
 from arealite.utils.save_load import get_state_dict_from_repo_id_or_path
 from realhf.api.core.data_api import load_hf_tokenizer
 from realhf.base import logging, name_resolve, names, pkg_version
@@ -112,14 +113,14 @@ class FSDPEngine(TrainEngine):
                     attn_implementation=self.config.attn_impl,
                 )
             else:
-                from liger_kernel.transformers import AutoLigerKernelForCausalLM
-
-                model = AutoLigerKernelForCausalLM.from_pretrained(
+                model = AutoModelForCausalLM.from_pretrained(
                     pretrained_model_name_or_path=self.config.path,
                     trust_remote_code=True,
                     torch_dtype=dtype,
                     attn_implementation=self.config.attn_impl,
                 )
+            if self.config.disable_dropout:
+                disable_dropout_in_model(model)
         if self.config.gradient_checkpointing:
             model.gradient_checkpointing_enable(
                 gradient_checkpointing_kwargs={"use_reentrant": False}
@@ -335,6 +336,9 @@ class FSDPEngine(TrainEngine):
             input_ = TensorDict(input_, batch_size=[input_["input_ids"].shape[0]])
         input_ = amend_position_ids(input_)
         mb_list = split_padded_tensor_dict_into_mb_list(input_, self.config.mb_spec)
+        logger.info(
+            f"Microbatch #tokens (rank {dist.get_rank()}): {mb_list.group_lens}"
+        )
         mb_list.mbs = [pack_tensor_dict(mb) for mb in mb_list.mbs]
         mb_list = pad_mb_list(mb_list, pad_value=0.0)
         # NOTE: We unsqueeze here because huggingface transformer models requires
@@ -364,10 +368,11 @@ class FSDPEngine(TrainEngine):
         dist.all_reduce(total_loss_weight)
 
         # Process microbatches with gradient accumulation
-        for pad_length, padded_mb_input, mb_input in zip(
-            mb_list.padding_lengths, mb_list.padded_mbs, mb_list.mbs
+        for i, (pad_length, padded_mb_input, mb_input) in enumerate(
+            zip(mb_list.padding_lengths, mb_list.padded_mbs, mb_list.mbs)
         ):
-            outputs = self.model(**padded_mb_input)
+            self.model.set_is_last_backward(i == len(mb_list.mbs) - 1)
+            outputs = self.model(**padded_mb_input, use_cache=False)
 
             logits = outputs.logits.squeeze(0)
             logits = logits[:-pad_length] if pad_length > 0 else logits
@@ -421,7 +426,7 @@ class FSDPEngine(TrainEngine):
         for pad_length, padded_mb_input, mb_input in zip(
             mb_list.padding_lengths, mb_list.padded_mbs, mb_list.mbs
         ):
-            outputs = self.model(**padded_mb_input)
+            outputs = self.model(**padded_mb_input, use_cache=False)
             logits = outputs.logits.squeeze(0)
             logits = logits[:-pad_length] if pad_length > 0 else logits
             loss = loss_fn(logits, mb_input)
@@ -453,7 +458,7 @@ class FSDPEngine(TrainEngine):
         for pad_length, padded_mb_input, mb_input in zip(
             mb_list.padding_lengths, mb_list.padded_mbs, mb_list.mbs
         ):
-            outputs = self.model(**padded_mb_input)
+            outputs = self.model(**padded_mb_input, use_cache=False)
             logits = outputs.logits.squeeze(0)
             logits = logits[:-pad_length] if pad_length > 0 else logits
 

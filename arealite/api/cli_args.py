@@ -181,6 +181,7 @@ class TrainEngineConfig:
     mb_spec: MicroBatchSpec = field(default_factory=MicroBatchSpec)
 
     # Training Backend Configuration
+    disable_dropout: bool = False
     gradient_checkpointing: bool = field(
         default=True, metadata={"help": "Enable gradient checkpointing"}
     )
