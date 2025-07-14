@@ -49,7 +49,7 @@ from arealite.utils.fsdp import (
 from arealite.utils.model import disable_dropout_in_model
 from arealite.utils.save_load import get_state_dict_from_repo_id_or_path
 from realhf.api.core.data_api import load_hf_tokenizer
-from realhf.base import logging, name_resolve, names, pkg_version, constants
+from realhf.base import constants, logging, name_resolve, names, pkg_version
 
 logger = logging.getLogger("FSDPEngine")
 
@@ -91,7 +91,9 @@ class FSDPEngine(TrainEngine):
         """Initialize distributed communication and model."""
         if not dist.is_initialized():
             # TODO: Handle the condition when WORLD_SIZE and RANK is not set in launcher
-            dist.init_process_group(backend="nccl", timeout=constants.NCCL_DEFAULT_TIMEOUT)
+            dist.init_process_group(
+                backend="nccl", timeout=constants.NCCL_DEFAULT_TIMEOUT
+            )
 
         # TODO: Handle the condition when LOCAL_RANK is not set in launcher
         torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
@@ -107,6 +109,9 @@ class FSDPEngine(TrainEngine):
         with torch.device("cuda"):
             if self.config.init_from_scratch:
                 # initialize scratch model from config
+                # NOTE: VLM cannot directly load state dict using this
+                # random initialized model, so otherwise we call
+                # from_pretrained rather than loading weights into this random model.
                 model = AutoModelForCausalLM.from_config(
                     self.model_config,
                     torch_dtype=dtype,
@@ -344,6 +349,10 @@ class FSDPEngine(TrainEngine):
         # NOTE: We unsqueeze here because huggingface transformer models requires
         # packed input to be of shape [1, total_seqlen].
         mb_list = unsqueeze_mb_list(mb_list)
+        # FIXME: the resulting max_seqlen is a tensor rather than an integer
+        for mb in mb_list.mbs:
+            mb["max_seqlen"] = int(mb["max_seqlen"])
+            mb["use_cache"] = False
         return mb_list
 
     def train_batch(
@@ -372,7 +381,7 @@ class FSDPEngine(TrainEngine):
             zip(mb_list.padding_lengths, mb_list.padded_mbs, mb_list.mbs)
         ):
             self.model.set_is_last_backward(i == len(mb_list.mbs) - 1)
-            outputs = self.model(**padded_mb_input, use_cache=False)
+            outputs = self.model(**padded_mb_input)
 
             logits = outputs.logits.squeeze(0)
             logits = logits[:-pad_length] if pad_length > 0 else logits
@@ -426,7 +435,7 @@ class FSDPEngine(TrainEngine):
         for pad_length, padded_mb_input, mb_input in zip(
             mb_list.padding_lengths, mb_list.padded_mbs, mb_list.mbs
         ):
-            outputs = self.model(**padded_mb_input, use_cache=False)
+            outputs = self.model(**padded_mb_input)
             logits = outputs.logits.squeeze(0)
             logits = logits[:-pad_length] if pad_length > 0 else logits
             loss = loss_fn(logits, mb_input)
@@ -458,7 +467,7 @@ class FSDPEngine(TrainEngine):
         for pad_length, padded_mb_input, mb_input in zip(
             mb_list.padding_lengths, mb_list.padded_mbs, mb_list.mbs
         ):
-            outputs = self.model(**padded_mb_input, use_cache=False)
+            outputs = self.model(**padded_mb_input)
             logits = outputs.logits.squeeze(0)
             logits = logits[:-pad_length] if pad_length > 0 else logits
 
