@@ -108,7 +108,7 @@ def test_remote_sglang_rollout(sglang_server, n_samples):
     data = {
         "messages": [{"role": "user", "content": "Hello, how are you?"}],
     }
-    result = engine.rollout([data] * 2, workflow=workflow)
+    result = engine.rollout_batch([data] * 2, workflow=workflow)
     assert isinstance(result, TensorDict)
     bs = result.batch_size
     assert bs == torch.Size([2 * n_samples])

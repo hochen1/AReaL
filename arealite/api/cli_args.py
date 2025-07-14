@@ -339,7 +339,6 @@ class SGLangConfig:
     model_path: str = ""
     random_seed: int = 1
     skip_tokenizer_init: bool = False
-
     disable_cuda_graph: bool = False
     disable_radix_cache: bool = False
     disable_cuda_graph_padding: bool = False
@@ -375,10 +374,8 @@ class SGLangConfig:
     schedule_policy: str = "lpm"
     schedule_conservativeness: float = 1.0
     cpu_offload_gb: int = 0
-
     dtype: str = "float16"
     kv_cache_dtype: str = "auto"
-
     # logging
     log_level: str = "warning"
     log_level_http: Optional[str] = "warning"
@@ -439,7 +436,6 @@ class SGLangConfig:
             raise ValueError(
                 "A installed SGLang package or a specific SGLang version should be provided to build SGLang server cmd."
             )
-
         if version_less_than_0_4_4:
             args.pop("log_requests_level")
         if version_less_than_0_4_3:
@@ -449,7 +445,6 @@ class SGLangConfig:
             args.pop("enable_memory_saver")
             args.pop("allow_auto_truncate")
             args.pop("file_storage_path")
-
         flags = []
         for k, v in args.items():
             if v is None or v is False or v == "":
@@ -504,11 +499,6 @@ class InferenceEngineConfig:
     request_retries: int = field(
         default=3, metadata={"help": "Number of retries for failed requests."}
     )
-
-
-@dataclass
-class SGLangEngineConfig:
-    pass
 
 
 @dataclass
@@ -807,7 +797,6 @@ def parse_cli_args(argv: List[str]):
         "--config", help="The path of the main configuration file", required=True
     )
     args, overrides = parser.parse_known_args(argv)
-
     # Initialize hydra config
     config_file = Path(args.config).absolute()
     assert config_file.exists()
@@ -834,7 +823,6 @@ def load_expr_config(argv: List[str], config_cls):
     cfg = to_structured_cfg(cfg, config_cls=config_cls)
     cfg = OmegaConf.to_object(cfg)
     assert isinstance(cfg, BaseExperimentConfig)
-
     # Setup environment
     from realhf.base import constants, name_resolve, names
 

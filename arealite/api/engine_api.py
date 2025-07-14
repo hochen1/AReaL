@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 import torch
 from tensordict import TensorDict
+from torchdata.stateful_dataloader import StatefulDataLoader
 
 from arealite.api.io_struct import (
     FinetuneSpec,
@@ -78,8 +79,8 @@ class TrainEngine(abc.ABC):
     def train_batch(
         self,
         input_: TensorDict,
-        loss_fn: Callable[[torch.Tensor, Dict], torch.Tensor],
-        loss_weight_fn: Callable[[Dict], float],
+        loss_fn: Callable[[torch.Tensor, TensorDict], torch.Tensor],
+        loss_weight_fn: Callable[[TensorDict], float],
     ) -> Dict[str, float]:
         """Update the model with a batch of data and a loss function."""
         raise NotImplementedError()
@@ -88,8 +89,8 @@ class TrainEngine(abc.ABC):
     def eval_batch(
         self,
         input_: TensorDict,
-        loss_fn: Callable[[torch.Tensor, Dict], torch.Tensor],
-        loss_weight_fn: Callable[[Dict], float],
+        loss_fn: Callable[[torch.Tensor, TensorDict], torch.Tensor],
+        loss_weight_fn: Callable[[TensorDict], float],
     ) -> torch.Tensor | None:
         """Evaluate the model using the forward pass and loss function."""
         raise NotImplementedError()
@@ -99,7 +100,7 @@ class TrainEngine(abc.ABC):
         self,
         input_: TensorDict,
         output_seqlens: List[List[int]] | None = None,
-        post_hook: Callable[[torch.Tensor, Dict], Any] | None = None,
+        post_hook: Callable[[torch.Tensor, TensorDict], Any] | None = None,
         aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
     ) -> Any | None:
         """Run the forward pass or inference on the model. Note that it is gradient-free."""
@@ -136,16 +137,24 @@ class InferenceEngine(abc.ABC):
         """Wait for a specified number of requests to complete, with a timeout."""
         raise NotImplementedError()
 
+    def rollout_batch(
+        self, data: List[Dict[str, Any]], workflow: "RolloutWorkflow"
+    ) -> TensorDict:
+        """Submit a batch of requests to the inference engine and wait for the results."""
+        raise NotImplementedError()
+
+    def prepare_batch(
+        self,
+        dataloader: StatefulDataLoader,
+        workflow: "RolloutWorkflow",
+    ):
+        """Asynchronously submit and wait until a full batch is ready."""
+        raise NotImplementedError()
+
     def pause(self):
         """Pause request submission for async rollout. Used during evaluation to prevent data over generation."""
         raise NotImplementedError()
 
     def resume(self):
         """Resume request submission for async rollout."""
-        raise NotImplementedError()
-
-    def rollout(
-        self, data: List[Dict[str, Any]], workflow: "RolloutWorkflow"
-    ) -> TensorDict:
-        """Submit a batch of requests to the inference engine and wait for the results."""
         raise NotImplementedError()

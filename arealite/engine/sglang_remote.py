@@ -481,7 +481,7 @@ class RemoteSGLangEngine(InferenceEngine):
         )
         return concat_padded_tensors(results)
 
-    def rollout(
+    def rollout_batch(
         self, data: List[Dict[str, Any]], workflow: "RolloutWorkflow"
     ) -> TensorDict:
         """Submit a batch of requests to the inference engine and wait for the results."""
