@@ -10,8 +10,8 @@ cluster:
   name_resolve:
     type: etcd3
     etcd3_addr: etcd-client.openpsi-etcd.svc.sigma-na130-lingbo.na130.wl-robby.local:2379
-  gpu_image: /storage/openpsi/images/areal-v0.3.0.post1.sif
-  gpu_infer_image: /storage/openpsi/images/areal-v0.3.0.post1.sif
+  gpu_image: /storage/openpsi/images/arealite-20250712-update-hf-xet.sif
+  gpu_infer_image: /storage/openpsi/images/arealite-20250712-update-hf-xet.sif
 seed: 1
 total_train_epochs: 10
 tokenizer_path: ${actor.path}
@@ -92,7 +92,7 @@ sglang:
 
 # datasets
 train_dataset:
-  batch_size: 16
+  batch_size: 128
   shuffle: true
   pin_memory: true
 
@@ -117,7 +117,7 @@ evaluator:
   experiment_name: ${experiment_name}
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
-  freq_epochs: 1
+  freq_epochs: null
   freq_steps: null
   freq_secs: null
 

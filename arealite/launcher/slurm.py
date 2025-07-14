@@ -357,7 +357,7 @@ class SlurmLauncher:
             # Prepare the command for each job in the array
             job_cmd = cmd[i]
             # FIXME: only for debugging, remove and replace new image
-            job_cmd = f'bash -c "pip3 install -r requirements.txt; {job_cmd}"'
+            # job_cmd = f'bash -c "pip3 install -r requirements.txt; {job_cmd}"'
 
             srun_cmd = SRUN_CMD_TEMPLATE.format(
                 nodes=1,

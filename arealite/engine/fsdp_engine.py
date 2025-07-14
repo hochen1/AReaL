@@ -49,7 +49,7 @@ from arealite.utils.fsdp import (
 from arealite.utils.model import disable_dropout_in_model
 from arealite.utils.save_load import get_state_dict_from_repo_id_or_path
 from realhf.api.core.data_api import load_hf_tokenizer
-from realhf.base import logging, name_resolve, names, pkg_version
+from realhf.base import logging, name_resolve, names, pkg_version, constants
 
 logger = logging.getLogger("FSDPEngine")
 
@@ -91,7 +91,7 @@ class FSDPEngine(TrainEngine):
         """Initialize distributed communication and model."""
         if not dist.is_initialized():
             # TODO: Handle the condition when WORLD_SIZE and RANK is not set in launcher
-            dist.init_process_group(backend="nccl")
+            dist.init_process_group(backend="nccl", timeout=constants.NCCL_DEFAULT_TIMEOUT)
 
         # TODO: Handle the condition when LOCAL_RANK is not set in launcher
         torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
