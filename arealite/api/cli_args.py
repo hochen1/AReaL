@@ -88,62 +88,6 @@ class GenerationHyperparameters:
 @dataclass
 class OptimizerConfig:
     """Configuration for model optimization during training.
-
-    Note:
-        Set type to "empty" for models that won't be trained.
-    """
-
-    type: str = field(
-        default="adam",
-        metadata={"help": "Optimizer type", "choices": ["adam", "empty"]},
-    )
-    lr: float = field(default=2e-5, metadata={"help": "Learning rate"})
-    weight_decay: float = field(default=0.05, metadata={"help": "Weight decay"})
-    beta1: float = field(default=0.9, metadata={"help": "Adam beta1 parameter"})
-    beta2: float = field(default=0.95, metadata={"help": "Adam beta2 parameter"})
-    eps: float = field(default=1e-5, metadata={"help": "Adam epsilon parameter"})
-    min_lr_ratio: float = field(
-        default=0.0,
-        metadata={
-            "help": "Minimum learning rate ratio after annealing",
-        },
-    )
-    lr_scheduler_type: str = field(
-        default="constant",
-        metadata={
-            "help": "Learning rate scheduler type",
-            "choices": ["linear", "cosine", "constant"],
-        },
-    )
-    warmup_steps_proportion: float = field(
-        default=0.001,
-        metadata={
-            "help": "Proportion of training steps for warmup",
-        },
-    )
-    offload: bool = field(
-        default=False, metadata={"help": "Enable optimizer state offloading"}
-    )
-    initial_loss_scale: float = field(
-        default=2**32, metadata={"help": "Initial loss scaling factor"}
-    )
-    min_loss_scale: float = field(
-        default=1.0, metadata={"help": "Minimum loss scaling factor"}
-    )
-    loss_scale_window: float = field(
-        default=5, metadata={"help": "Window size for loss scaling adjustment"}
-    )
-    hysteresis: int = field(
-        default=2, metadata={"help": "Hysteresis (scaling factor) for loss scaling"}
-    )
-    gradient_clipping: float = field(
-        default=1.0, metadata={"help": "Gradient clipping threshold"}
-    )
-
-
-@dataclass
-class OptimizerConfig:
-    """Configuration for model optimization during training.
     Note:
         Set type to "empty" for models that won't be trained.
     """
