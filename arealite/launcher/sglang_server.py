@@ -147,9 +147,16 @@ class SGLangServerWrapper:
             f"SGLang server at http://{host_ip}:{server_port} exits, returncode={return_code}"
         )
 
+    def __del__(self):
+        if self.server_process and self.server_process.poll() is None:
+            logger.info("Terminating SGLang server process...")
+            self.server_process.terminate()
+            self.server_process.wait()
+            logger.info("SGLang server process terminated.")
 
-if __name__ == "__main__":
-    config, _ = parse_cli_args(sys.argv[2:])
+
+def main_sglang_server(argv):
+    config, _ = parse_cli_args(argv)
     config.sglang = to_structured_cfg(config.sglang, SGLangConfig)
     config.cluster.name_resolve = to_structured_cfg(
         config.cluster.name_resolve, NameResolveConfig
@@ -169,3 +176,7 @@ if __name__ == "__main__":
         n_gpus_per_node=config.n_gpus_per_node,
     )
     sglang_server.run()
+
+
+if __name__ == "__main__":
+    main_sglang_server(sys.argv[1:])

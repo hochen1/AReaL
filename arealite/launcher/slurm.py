@@ -8,8 +8,6 @@ import sys
 import time
 from typing import Dict, List, Literal, Optional, Tuple
 
-from omegaconf import OmegaConf
-
 import realhf.base.logging as logging
 from arealite.api.cli_args import (
     BaseExperimentConfig,
@@ -20,197 +18,24 @@ from arealite.api.cli_args import (
     to_structured_cfg,
 )
 from arealite.api.io_struct import AllocationMode, AllocationType
+from arealite.utils.launcher import (
+    get_env_vars,
+    wait_sglang_server_addrs,
+)
+from arealite.utils.slurm import ( 
+    cancel_jobs, 
+    query_jobs,
+    SBATCH_SCRIPT_TEMPLATE,
+    DEFAULT_SRUN_CMD_TEMPLATE
+)
 from realhf.base import logging, name_resolve, names
 from realhf.scheduler.client import JobException, JobInfo, JobState
 
 logger = logging.getLogger("SlurmLauncher")
 
-
-SQUEUE_FIELDS = [
-    "JobID",
-    "State",
-    "SubmitTime",
-    "StartTime",
-    "Name",
-    "NodeList",
-    "UserName",
-    "MaxCPUs",
-    "cpus-per-task",
-    "NumTasks",
-    "tres-alloc",
-]
-STATUS_MAPPING = {
-    "RUNNING": JobState.RUNNING,
-    "COMPLETING": JobState.RUNNING,
-    "PENDING": JobState.PENDING,
-    "CANCELLED": JobState.CANCELLED,
-    "FAILED": JobState.FAILED,
-    "COMPLETED": JobState.COMPLETED,
-    "OUT_OF_MEMORY": JobState.FAILED,
-    "DEADLINE": JobState.COMPLETED,
-    "TIMEOUT": JobState.COMPLETED,
-}
+SLURM_WAIT_CHECK_TIME_INTERVAL = 5
 
 
-def cancel_jobs(
-    slurm_names: Optional[List[str]] = None,
-    slurm_ids: Optional[List[int]] = None,
-    signal: Literal["SIGINT", "SIGKILL"] = "SIGKILL",
-):
-    assert (
-        slurm_names is not None or slurm_ids is not None
-    ), "Must specify slurm_names or slurm_ids."
-    assert not (
-        slurm_names and slurm_ids
-    ), "Cannot specify both slurm_names and slurm_ids."
-    cmd = ["scancel", "-s", signal]
-    if slurm_names is not None:
-        cmd += ["-n", ",".join(slurm_names)]
-    elif slurm_ids is not None:
-        cmd += [",".join(str(s) for s in slurm_ids)]
-    subprocess.check_call(cmd)
-    logger.info(
-        f"Cancelled Slurm job with signal {signal}: "
-        f"slurm identifiers {slurm_names if slurm_ids is None else slurm_ids}. CMD: {cmd}"
-    )
-
-
-def query_jobs(
-    slurm_names: Optional[List[str]] = None,
-    slurm_ids: Optional[List[int]] = None,
-    status: str = "all",
-    delimiter: str = "__PSI__",
-) -> List[JobInfo]:
-    squeue_format = f":.{delimiter},".join(SQUEUE_FIELDS)
-    cmd = ["squeue", "-O", squeue_format, f"-t{status}"]
-    if slurm_names is not None:
-        cmd += ["-n", ",".join(slurm_names)]
-    if slurm_ids is not None:
-        cmd += ["-j", ",".join([str(s) for s in slurm_ids])]
-
-    output = (
-        subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("ascii").strip()
-    )
-    rs = []
-    for line in output.split("\n")[1:]:
-        job_id, state, submit_time, start_time, slurm_name, nodelist, *_ = line.split(
-            delimiter
-        )
-        rs.append(
-            JobInfo(
-                name=slurm_name,
-                state=STATUS_MAPPING[state],
-                host=nodelist,
-                submit_time=submit_time,
-                start_time=start_time,
-                slurm_id=int(job_id.strip()),
-            )
-        )
-    return rs
-
-
-def parse_slurm_nodelist(nodelist: str) -> List[str]:
-    return (
-        subprocess.check_output(
-            [
-                "scontrol",
-                "show",
-                "hostnames",
-                nodelist,
-            ]
-        )
-        .decode("utf-8")
-        .strip()
-        .split("\n")
-    )
-
-
-def get_slurm_host_ip(node: str):
-    try:
-        cmd = f"srun --overlap --mpi=pmi2 --immediate=1 --nodes=1 --ntasks=1 -n1 -c1 --mem=10M --nodelist={node} hostname --ip-address"
-        return subprocess.check_output(cmd.split(" ")).decode("utf-8").strip()
-    except subprocess.CalledProcessError:
-        logger.warning(f"Get slurm host ip for node {node} failed.")
-
-
-SGLANG_SERVER_TIMEOUT_SECONDS = 180
-SCHEDULER_WAIT_CHECK_TIME_INTERVAL = 5
-
-
-SBATCH_SCRIPT_TEMPLATE = """#!/bin/bash
-{sbatch_options}
-
-# Getting the node names
-nodes=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
-echo nodes=$nodes
-
-nodes_array=($nodes)
-echo node_array=$nodes_array
-
-head_node=${{nodes_array[0]}}
-echo head_node=$head_node
-
-# Getting the head node IP address
-head_node_ip=$(srun --overlap --mpi=pmi2 --nodes=1 --ntasks=1 -n1 -c1 --mem=10M --nodelist="$head_node" hostname --ip-address)
-echo head_node_ip=$head_node_ip
-
-# srun commands
-{srun_cmds}
-
-wait
-"""
-
-SRUN_CMD_TEMPLATE: str = """srun --overlap --mpi=pmi2 -K -l --chdir $PWD --nodelist=${{nodes_array[{node_id}]}} \\
-    --nodes={nodes} --ntasks={ntasks} --gres=gpu:{n_gpus_per_node} --cpus-per-task={cpus_per_task} \\
-    --mem-per-cpu={mem_per_cpu}M {apptainer_name} exec {apptainer_options} --bind {container_mounts} \\
-    {container_env_strings} \\
-    {container_image} \\
-    {cmd} &
-"""
-
-LOCAL_CACHE_DIR = "/tmp/arealite"
-PYTORCH_KERNEL_CACHE_PATH = (
-    f"{LOCAL_CACHE_DIR}/.cache/{getpass.getuser()}/torch/kernels"
-)
-TRITON_CACHE_PATH = f"{LOCAL_CACHE_DIR}/.cache/{getpass.getuser()}/triton"
-os.makedirs(PYTORCH_KERNEL_CACHE_PATH, exist_ok=True)
-os.makedirs(TRITON_CACHE_PATH, exist_ok=True)
-BASE_ENVIRONS = {
-    "TOKENIZERS_PARALLELISM": "true",
-    "PYTORCH_KERNEL_CACHE_PATH": PYTORCH_KERNEL_CACHE_PATH,
-    "TRITON_CACHE_DIR": TRITON_CACHE_PATH,
-    "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-    "OMP_NUM_THREADS": str(min(os.cpu_count(), 32)),
-    "HF_ENDPOINT": "https://hf-mirror.com",  # FIXME: move to user option
-    "PYTHONPATH": pathlib.Path(__file__).resolve().parent.parent.parent,
-}
-NA132_ENVIRONS = {
-    "NCCL_SOCKET_IFNAME": "bond0",
-    "NCCL_NET_PLUGIN": "",
-    "NCCL_IB_GID_INDEX": "3",
-    "NCCL_IB_TIMEOUT": "2",
-    "NCCL_IB_RETRY_CNT": "7",
-    "NCCL_IB_SL": "5",
-    "NCCL_IB_TC": "136",
-    "NCCL_IB_HCA": "mlx5_bond",
-    "NCCL_IB_QPS_PER_CONNECTION": "8",
-    "NCCL_SET_THREAD_NAME": "1",
-    "NCCL_DEBUG": "WARN",
-    "NCCL_DEBUG_SUBSYS": "INIT,TUNING,GRAPH",
-}
-
-
-def get_env_vars(cluster_name: str, additional_env_vars: str = None) -> Dict[str, str]:
-    """Returns the environment variables for the cluster."""
-    additional_env_vars = {}
-    if additional_env_vars:
-        additional_env_vars = dict(
-            item.split("=") for item in additional_env_vars.split(",")
-        )
-    if cluster_name == "na132":
-        return {**BASE_ENVIRONS, **NA132_ENVIRONS, **additional_env_vars}
-    else:
-        return {**BASE_ENVIRONS, **additional_env_vars}
 
 
 class SlurmLauncher:
@@ -261,6 +86,7 @@ class SlurmLauncher:
         self,
         job_name: str,
         cmd: List[str] | str,
+        srun_cmd_template: str,
         count: int,
         nodes: int,
         n_gpus_per_node: int,
@@ -271,13 +97,6 @@ class SlurmLauncher:
         env_vars: Optional[Dict] = None,
         nodelist: Optional[str] = None,
         exclude: Optional[str] = None,
-        apptainer_name: Optional[str] = "singularity",
-        apptainer_options: Optional[Tuple[str, ...]] = (
-            "--no-home",
-            "--writable-tmpfs",
-            "--nv",
-            "--pid",
-        ),
     ):
         """Submits and launch a job array with SBATCH.
         Note that a job array has one (unique) slurm name, and one (unique) slurm id.
@@ -359,15 +178,13 @@ class SlurmLauncher:
             # FIXME: only for debugging, remove and replace new image
             # job_cmd = f'bash -c "pip3 install -r requirements.txt; {job_cmd}"'
 
-            srun_cmd = SRUN_CMD_TEMPLATE.format(
+            srun_cmd = srun_cmd_template.format(
                 nodes=1,
                 ntasks=1,
                 node_id=node_id,
                 n_gpus_per_node=n_gpus_per_node,
                 cpus_per_task=cpus_per_task,
                 mem_per_cpu=mem_per_cpu,
-                apptainer_name=apptainer_name,
-                apptainer_options=" ".join(apptainer_options),
                 container_mounts=container_mounts or "",
                 container_env_strings=env_string,
                 container_image=container_image,
@@ -534,7 +351,7 @@ class SlurmLauncher:
                     left.remove(slurm_id)
                     if update:
                         self.jobs.pop(slurm_info.slurm_id)
-            time.sleep(SCHEDULER_WAIT_CHECK_TIME_INTERVAL)
+            time.sleep(SLURM_WAIT_CHECK_TIME_INTERVAL)
 
     def _update_all(self):
         """Updates the status of all jobs."""
@@ -550,7 +367,7 @@ class SlurmLauncher:
 
 
 if __name__ == "__main__":
-    # usage: python -m arealite.launcher.slurm <entry_point> <config_path> [<args>]
+    # usage: python -m arealite.launcher.slurm <entry_point> --config <config_path> [<additional_args>]
     config, config_file = parse_cli_args(sys.argv[2:])
 
     config.launcher = to_structured_cfg(config.launcher, LauncherConfig)
@@ -601,43 +418,30 @@ if __name__ == "__main__":
             )
             sglang_cmds.append(sglang_cmd)
 
-        if sglang_cmds:
-            launcher.submit_array(
-                job_name="sglang-server",
-                cmd=sglang_cmds,
-                count=n_sglang_servers,
-                nodes=n_sglang_nodes,
-                n_gpus_per_node=config.cluster.n_gpus_per_node,
-                cpus_per_task=config.launcher.inference_server_cpus_per_gpu
-                * sglang_tp_size,
-                mem_per_task=config.launcher.inference_server_mem_per_gpu
-                * sglang_tp_size,
-                container_image=config.cluster.gpu_infer_image,
-                container_mounts=config.cluster.mount,
-                env_vars=get_env_vars(
-                    config.cluster.cluster_name,
-                    config.launcher.inference_server_env_vars,
-                ),
-            )
-
+        launcher.submit_array(
+            job_name="llm_server",
+            cmd=sglang_cmds,
+            srun_cmd_template=config.launcher.srun_cmd_template or DEFAULT_SRUN_CMD_TEMPLATE,
+            count=n_sglang_servers,
+            nodes=n_sglang_nodes,
+            n_gpus_per_node=config.cluster.n_gpus_per_node,
+            cpus_per_task=config.launcher.inference_server_cpus_per_gpu
+            * sglang_tp_size,
+            mem_per_task=config.launcher.inference_server_mem_per_gpu
+            * sglang_tp_size,
+            container_image=config.cluster.gpu_infer_image,
+            container_mounts=config.cluster.mount,
+            env_vars=get_env_vars(
+                config.cluster.cluster_name,
+                config.launcher.inference_server_env_vars,
+            ),
+        )
         # Get SGLang slurm nodes, find the hosts
-        name = names.gen_servers(config.experiment_name, config.trial_name)
-        start = time.perf_counter()
-        while True:
-            sglang_addrs = name_resolve.get_subtree(name)
-            if len(sglang_addrs) >= n_sglang_servers:
-                logger.info(
-                    f"Found {n_sglang_servers} SGLang servers: {', '.join(sglang_addrs)}"
-                )
-                break
-
-            time.sleep(1)
-            if time.perf_counter() - start > SGLANG_SERVER_TIMEOUT_SECONDS:
-                launcher.stop_all()
-                raise TimeoutError(
-                    f"Timeout waiting for SGLang servers to be ready. "
-                    f"Expected {n_sglang_servers} servers, found {len(sglang_addrs)}."
-                )
+        sglang_addrs = wait_sglang_server_addrs(
+            config.experiment_name,
+            config.trial_name,
+            n_sglang_servers,
+        )
 
     trainer_n_nodes = n_nodes - n_sglang_nodes
     trainer_cmd_template = (
@@ -662,6 +466,7 @@ if __name__ == "__main__":
         launcher.submit_array(
             job_name="trainer",
             cmd=trainer_cmds,
+            srun_cmd_template=config.launcher.srun_cmd_template or DEFAULT_SRUN_CMD_TEMPLATE,
             count=trainer_n_nodes,
             nodes=trainer_n_nodes,
             n_gpus_per_node=config.cluster.n_gpus_per_node,

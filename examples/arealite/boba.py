@@ -106,8 +106,8 @@ def boba_reward_fn(
     return label
 
 
-def main_grpo():
-    config, _ = load_expr_config(sys.argv[1:], GRPOConfig)
+def main_grpo(argv):
+    config, _ = load_expr_config(argv, GRPOConfig)
     config: GRPOConfig
 
     rank = int(os.getenv("RANK"))
@@ -238,4 +238,4 @@ def main_grpo():
 
 
 if __name__ == "__main__":
-    main_grpo()
+    main_grpo(sys.argv[1:])

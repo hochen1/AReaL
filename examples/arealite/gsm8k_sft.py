@@ -38,8 +38,8 @@ def get_gsm8k_dataset(split, tokenizer, rank, world_size):
     return process_gsm8k_sft_dataset(dataset, tokenizer)
 
 
-def main_sft():
-    config, _ = load_expr_config(sys.argv[1:], SFTConfig)
+def main_sft(argv):
+    config, _ = load_expr_config(argv, SFTConfig)
     config: SFTConfig
 
     rank = int(os.getenv("RANK"))
@@ -120,4 +120,4 @@ def main_sft():
 
 
 if __name__ == "__main__":
-    main_sft()
+    main_sft(sys.argv[1:])

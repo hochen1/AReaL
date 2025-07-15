@@ -624,6 +624,23 @@ class DatasetConfig:
     drop_last: bool = field(default=True)
 
 
+
+@dataclass
+class RayLauncherConfig:
+    """Configuration for launching the SGLang server with Ray."""
+    main_func_name: int = field(
+        default="main",
+        metadata={"help": "Name of the main function in the entrypoint file to run in Ray workers."},
+    )
+
+@dataclass
+class SlurmLauncherConfig:
+    """Configuration for launching the SGLang server with Slurm."""
+    srun_cmd_template: Optional[str] = field(
+        default=None,
+        metadata={"help": "Template for the srun command to launch the SGLang server."},
+    )
+
 @dataclass
 class LauncherConfig:
     """Configuration for launching the SGLang server."""
@@ -661,6 +678,10 @@ class LauncherConfig:
     trainer_port: int = field(
         default=27015,
         metadata={"help": "Trainer port used for torch.distributed initialization."},
+    )
+    ray: RayLauncherConfig = field(
+        default_factory=RayLauncherConfig,
+        metadata={"help": "Ray launcher configuration."},
     )
 
 
