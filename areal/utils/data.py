@@ -248,11 +248,10 @@ def pack_tensor_dict(data: TensorDict):
     packed_data["cu_seqlens"] = cu_seqlens
     packed_data["max_seqlen"] = max_seqlen
     for key, value in data.items():
-        # if key == "attention_mask":
-        #     packed_data["cu_seqlens"] = cu_seqlens
-        #     packed_data["max_seqlen"] = max_seqlen
-        # # tensor and of shape [B, S, ...]
-        if (
+        if key == "attention_mask":
+            packed_data["cu_seqlens"] = cu_seqlens
+            packed_data["max_seqlen"] = max_seqlen
+        elif (
             torch.is_tensor(value)
             and value.ndim >= 2
             and value.shape[0] == bs
