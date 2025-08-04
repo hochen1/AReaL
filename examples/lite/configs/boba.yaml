@@ -92,6 +92,7 @@ sglang:
 
 # datasets
 train_dataset:
+  path: /storage/openpsi/users/xushusheng.xss/training_data/boba_106k_0319.jsonl
   batch_size: 512
   shuffle: true
   pin_memory: true
@@ -126,7 +127,7 @@ stats_logger:
   trial_name: ${trial_name}
   fileroot: ${cluster.fileroot}
   wandb:
-    mode: online
+    mode: disabled
 
 # Launcher
 launcher:

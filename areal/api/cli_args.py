@@ -642,7 +642,7 @@ class SlurmLauncherConfig:
         default="apptainer",
         metadata={
             "help": "Type of containers used in slurm",
-            "choices": ["apptainer", "none"],
+            "choices": ["apsptainer", "none"],
         },
     )
     mount: str = field(

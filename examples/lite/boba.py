@@ -14,11 +14,7 @@ from tensordict import TensorDict
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import PreTrainedTokenizerFast
 
-from areal.api.cli_args import (
-    GenerationHyperparameters,
-    GRPOConfig,
-    load_expr_config,
-)
+from areal.api.cli_args import GenerationHyperparameters, GRPOConfig, load_expr_config
 from areal.api.io_struct import (
     AllocationMode,
     FinetuneSpec,
@@ -39,6 +35,7 @@ logger = logging.getLogger("boba math")
 
 
 REWARD_TIMEOUT_SECONDS = 15
+
 
 class RLVRWorkflow(RolloutWorkflow):
     def __init__(
@@ -91,10 +88,9 @@ class RLVRWorkflow(RolloutWorkflow):
                         self.rw_executor,
                         functools.partial(
                             self.reward_fn,
-                            prompt_str,
-                            completions_str,
-                            resp.input_tokens,
-                            resp.output_tokens,
+                            completions=completions_str,
+                            prompt_ids=resp.input_tokens,
+                            completion_ids=resp.output_tokens,
                             **data,
                         ),
                     ),
@@ -148,11 +144,11 @@ class RLVRWorkflow(RolloutWorkflow):
         return concat_padded_tensors(results)
 
 
-def get_boba_math_dataset(tokenizer, rank, world_size):
+def get_boba_math_dataset(path, tokenizer, rank, world_size):
     dataset = load_dataset(
         path="json",
         split="train",
-        data_files="/storage/openpsi/users/xushusheng.xss/training_data/boba_106k_0319.jsonl",
+        data_files=path,
     )
     dataset = dataset.filter(lambda x: len(tokenizer.encode(x["prompt"])) <= 1024)
     return split_dataset_by_node(dataset, rank=rank, world_size=world_size)
@@ -162,7 +158,7 @@ def boba_reward_fn(
     prompt, completions, prompt_ids, completion_ids, query_id, solutions, **kwargs
 ):
     from realhf.impl.dataset.math_parser import process_results
-    
+
     label = 0
     for sol in solutions:
         x = process_results(completions, sol)
@@ -182,7 +178,7 @@ def main(args):
 
     # Create dataset and dataloaders
     train_dataloader = StatefulDataLoader(
-        get_boba_math_dataset(tokenizer, rank, world_size),
+        get_boba_math_dataset(config.train_dataset.path, tokenizer, rank, world_size),
         batch_size=config.train_dataset.batch_size // world_size,
         shuffle=config.train_dataset.shuffle,
         num_workers=config.train_dataset.num_workers,
