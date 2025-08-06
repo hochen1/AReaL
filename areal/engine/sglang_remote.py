@@ -305,9 +305,9 @@ class RemoteSGLangEngine(InferenceEngine):
         )
 
     def rollout_batch(
-        self, data: List[Dict[str, Any]], workflow: "RolloutWorkflow"
+        self, data: List[Dict[str, Any]], workflow: "RolloutWorkflow", should_accept: Callable | None = None
     ) -> TensorDict:
-        return self.workflow_executor.rollout_batch(data, workflow)
+        return self.workflow_executor.rollout_batch(data, workflow, should_accept)
 
     def prepare_batch(
         self,

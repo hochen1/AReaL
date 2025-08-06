@@ -235,12 +235,12 @@ class WorkflowExecutor:
         return concat_padded_tensors(results)
 
     def rollout_batch(
-        self, data: List[Dict[str, Any]], workflow: "RolloutWorkflow"
+        self, data: List[Dict[str, Any]], workflow: "RolloutWorkflow", should_accept: Callable | None = None
     ) -> TensorDict:
         """Submit a batch of requests to the inference engine and wait for the results."""
         for item in data:
             self.submit(item, workflow)
-        return self.wait(count=len(data))
+        return self.wait(count=len(data), should_accept=should_accept)
 
     def prepare_batch(
         self,

@@ -26,6 +26,24 @@ def gsm8k_reward_fn(prompt, completions, prompt_ids, completion_ids, answer, **k
     return int(process_results(completions, answer)[0])
 
 
+def should_accept_group_filter(result):
+    """Filter out groups where all rewards are 0 or all rewards are 1.
+    
+    Args:
+        result: TensorDict containing a group of sequences
+               - result["rewards"]: shape [group_size] - rewards for each sequence in the group
+    
+    Returns:
+        bool: True if group should be accepted, False if rejected
+    """
+    rewards = result["rewards"]  # shape: [group_size]
+    
+    # Check if all rewards are 0 or all rewards are 1
+    if torch.all(rewards == 0) or torch.all(rewards == 1):
+        return False  # Reject this group
+    return True  # Accept this group
+
+
 def main(args):
     config, _ = load_expr_config(args, GRPOConfig)
     config: GRPOConfig
@@ -135,9 +153,13 @@ def main(args):
 
         with stats_tracker.record_timing("rollout"):
             if config.async_training:
-                batch = rollout.prepare_batch(train_dataloader, workflow=workflow)
+                batch = rollout.prepare_batch(
+                    train_dataloader, 
+                    workflow=workflow,
+                    should_accept=should_accept_group_filter
+                )
             else:
-                batch = rollout.rollout_batch(next(data_generator), workflow=workflow)
+                batch = rollout.rollout_batch(next(data_generator), workflow=workflow, should_accept=should_accept_group_filter)
 
         batch = batch.to(actor.device)
         # Create barrier to synchronize all rollout processes.
