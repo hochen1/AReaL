@@ -242,6 +242,12 @@ class PPOActorConfig(TrainEngineConfig):
     eps_clip: float = field(
         default=0.2, metadata={"help": "Clipping factor for policy ratio"}
     )
+    eps_clip_high: Optional[float] = field(
+        default=None, metadata={"help": "High clipping factor for policy ratio"}
+    )
+    eps_clip_low: Optional[float] = field(
+        default=None, metadata={"help": "Low clipping factor for policy ratio"}
+    )
     c_clip: Optional[float] = field(
         default=None,
         metadata={

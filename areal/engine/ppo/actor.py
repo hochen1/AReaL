@@ -193,6 +193,8 @@ class PPOActor:
         scalars = dict(
             mask_no_eos_with_zero=self.config.mask_no_eos_with_zero,
             eps_clip=self.config.eps_clip,
+            eps_clip_high=self.config.eps_clip_high,
+            eps_clip_low=self.config.eps_clip_low,
         )
         if self.config.c_clip is not None:
             scalars["c_clip"] = self.config.c_clip
@@ -226,6 +228,8 @@ class PPOActor:
                     grpo_loss_fn,
                     temperature=self.temperature,
                     eps_clip=self.config.eps_clip,
+                    eps_clip_high=self.config.eps_clip_high,
+                    eps_clip_low=self.config.eps_clip_low,
                     c_clip=self.config.c_clip,
                     behav_imp_weight_cap=self.config.behav_imp_weight_cap,
                 ),
@@ -262,6 +266,8 @@ def grpo_loss_fn(
     input_data: Dict,
     temperature: float,
     eps_clip: float,
+    eps_clip_high: float,
+    eps_clip_low: float,
     c_clip: float | None,
     behav_imp_weight_cap: float | None,
 ):
@@ -282,6 +288,8 @@ def grpo_loss_fn(
         old_logprobs=old_logp,
         advantages=advantages,
         eps_clip=eps_clip,
+        eps_clip_high=eps_clip_high,
+        eps_clip_low=eps_clip_low,
         loss_mask=loss_mask,
         c_clip=c_clip,
         proximal_logprobs=prox_logp,
