@@ -63,12 +63,12 @@ def _ppo_actor_loss_from_model_outputs(
     input_: SequenceSample,
     kl_adapter: ppo_functional.KLController,  # const
     eps_clip: float,  # const
-    eps_clip_high: float,  # const
-    eps_clip_low: float,  # const
     c_clip: float | None,
     behav_imp_weight_cap: float | None,
     early_stop_imp_ratio: Optional[float],  # const
     early_stop_kl: Optional[float],  # const
+    eps_clip_high: Optional[float] = None,  # const
+    eps_clip_low: Optional[float] = None,  # const
     temperature: Optional[float] = 1,
 ) -> torch.Tensor:
     """Loss function for ppo actor step, all inputs should be splitted into
@@ -802,12 +802,12 @@ class PPOActorInterface(model_api.ModelInterface):
                     input_,
                     kl_adapter=self.kl_adapter,
                     eps_clip=self.eps_clip,
-                    eps_clip_high=self.eps_clip_high,
-                    eps_clip_low=self.eps_clip_low,
-                    early_stop_imp_ratio=self.early_stop_imp_ratio,
-                    early_stop_kl=self.early_stop_kl,
                     c_clip=self.c_clip,
                     behav_imp_weight_cap=self.behav_imp_weight_cap,
+                    early_stop_imp_ratio=self.early_stop_imp_ratio,
+                    early_stop_kl=self.early_stop_kl,
+                    eps_clip_high=self.eps_clip_high,
+                    eps_clip_low=self.eps_clip_low,
                     temperature=self.gconfig.temperature,
                 )
 
