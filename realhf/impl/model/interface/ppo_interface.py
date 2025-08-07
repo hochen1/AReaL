@@ -63,6 +63,8 @@ def _ppo_actor_loss_from_model_outputs(
     input_: SequenceSample,
     kl_adapter: ppo_functional.KLController,  # const
     eps_clip: float,  # const
+    eps_clip_high: float,  # const
+    eps_clip_low: float,  # const
     c_clip: float | None,
     behav_imp_weight_cap: float | None,
     early_stop_imp_ratio: Optional[float],  # const
@@ -95,6 +97,8 @@ def _ppo_actor_loss_from_model_outputs(
         old_logprobs=old_logp,
         advantages=advantages,
         eps_clip=eps_clip,
+        eps_clip_high=eps_clip_high,
+        eps_clip_low=eps_clip_low,
         loss_mask=ppo_loss_mask,
         c_clip=c_clip,
         proximal_logprobs=input_.data.get("prox_logp", None),
@@ -220,6 +224,8 @@ class PPOActorInterface(model_api.ModelInterface):
     gae_lambda: float = 1.0
 
     eps_clip: float = 0.2
+    eps_clip_high: Optional[float] = None
+    eps_clip_low: Optional[float] = None
     c_clip: Optional[float] = None
     behav_imp_weight_cap: Optional[float] = None
     value_eps_clip: float = 0.2
@@ -247,6 +253,7 @@ class PPOActorInterface(model_api.ModelInterface):
     generation_size: Optional[int] = None
     mask_no_eos_with_zero: bool = False
     group_adv_norm: bool = False
+    group_reward_norm: bool = False
     mask_too_long: bool = False
     use_dense_reward: bool = False
     reward_delta: bool = True
@@ -639,6 +646,8 @@ class PPOActorInterface(model_api.ModelInterface):
             rewards=rewards,
             short1cu_seqlens=short1cu_seqlens,
             seq_no_eos_mask=seq_no_eos_mask,
+            group_size=self.group_size,
+            group_reward_norm=self.group_reward_norm,
         )
 
         # Optionally perform normalization.
@@ -768,6 +777,8 @@ class PPOActorInterface(model_api.ModelInterface):
             scalars = dict(
                 disable_value=self.disable_value,
                 mask_no_eos_with_zero=self.mask_no_eos_with_zero,
+                eps_clip_high=self.eps_clip_high,
+                eps_clip_low=self.eps_clip_low,
                 eps_clip=self.eps_clip,
                 use_prox_logp=use_prox_logp,
             )
@@ -791,6 +802,8 @@ class PPOActorInterface(model_api.ModelInterface):
                     input_,
                     kl_adapter=self.kl_adapter,
                     eps_clip=self.eps_clip,
+                    eps_clip_high=self.eps_clip_high,
+                    eps_clip_low=self.eps_clip_low,
                     early_stop_imp_ratio=self.early_stop_imp_ratio,
                     early_stop_kl=self.early_stop_kl,
                     c_clip=self.c_clip,

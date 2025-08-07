@@ -53,6 +53,8 @@ def actor_loss_fn(
     old_logprobs: torch.FloatTensor,
     advantages: torch.FloatTensor,
     eps_clip: float,
+    eps_clip_high: Optional[float] = None,
+    eps_clip_low: Optional[float] = None,
     loss_mask: Optional[torch.BoolTensor] = None,
     c_clip: Optional[float] = None,
     proximal_logprobs: Optional[torch.FloatTensor] = None,
@@ -67,7 +69,9 @@ def actor_loss_fn(
         logprobs (torch.FloatTensor): Log probabilities of actions.
         old_logprobs (torch.FloatTensor): Old log probabilities of actions.
         advantages (torch.FloatTensor): GAE (normalized) advantages.
-        eps_clip (float): Clip ratio of PPO.
+        eps_clip (float): Clip ratio of PPO (legacy parameter, kept for compatibility).
+        eps_clip_high (float): High clipping factor for policy ratio.
+        eps_clip_low (float): Low clipping factor for policy ratio.
         c_clip (float | None): The dual clip factor.
             Check https://arxiv.org/pdf/1912.09729 for details.
         loss_mask (Optional[torch.BoolTensor], optional): Mask for loss computation.
@@ -102,7 +106,10 @@ def actor_loss_fn(
     # For numerical stability.
     ratio = torch.where(loss_mask, torch.exp(logprobs - denorm_logprobs), 0)
 
-    clipped_ratio = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
+    cliprange_high = eps_clip_high if eps_clip_high is not None else eps_clip
+    cliprange_low = eps_clip_low if eps_clip_low is not None else eps_clip
+
+    clipped_ratio = torch.clamp(ratio, 1.0 - cliprange_low, 1.0 + cliprange_high)
     pg_loss1 = -advantages * ratio
     pg_loss2 = -advantages * clipped_ratio
     clip_mask = pg_loss1.detach() < pg_loss2.detach()
@@ -374,7 +381,40 @@ def get_packed_advantages_and_returns(
     rewards: torch.FloatTensor,
     short1cu_seqlens: torch.IntTensor,
     seq_no_eos_mask: torch.FloatTensor,
+    group_size: int = 1,
+    group_reward_norm: bool = False,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
+    # Group reward normalization at the beginning
+    if group_reward_norm:
+        # Get the positions where reward_score is added
+        reward_positions = short1cu_seqlens[1:] - 1
+        n_sequences = len(short1cu_seqlens) - 1
+        n_groups = n_sequences // group_size
+        
+        # Create a copy of rewards for normalization
+        normalized_rewards = rewards.clone()
+        
+        for group_idx in range(n_groups):
+            # Get reward positions for this group
+            group_start_seq = group_idx * group_size
+            group_end_seq = (group_idx + 1) * group_size
+            
+            # Get the reward values at the last token positions for this group
+            group_reward_positions = reward_positions[group_start_seq:group_end_seq]
+            group_reward_values = rewards[group_reward_positions]
+            
+            # Skip normalization if group has only one element or all zeros
+            if len(group_reward_values) > 1:
+                # Z-score normalization: (x - mean) / std
+                group_mean = group_reward_values.mean()
+                group_std = group_reward_values.std()
+                normalized_group_rewards = (group_reward_values - group_mean) / (group_std + 1e-9)
+                
+                # Put normalized rewards back to their original positions
+                normalized_rewards[group_reward_positions] = normalized_group_rewards
+        
+        rewards = normalized_rewards
+    
     if rewards.get_device() == -1:
         return pygae1d_nolp_misalign(
             rewards, values, short1cu_seqlens, seq_no_eos_mask, gamma, lam
